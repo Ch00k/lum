@@ -42,9 +42,6 @@ func init() {
 	md = goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,
-			extension.Table,
-			extension.Strikethrough,
-			extension.TaskList,
 			highlighting.NewHighlighting(
 				highlighting.WithStyle("friendly"),
 			),
