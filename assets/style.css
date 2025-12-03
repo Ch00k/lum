@@ -165,3 +165,28 @@ ul.contains-task-list {
 ul.contains-task-list li {
     padding-left: 1.5em;
 }
+
+/* Index page styles */
+.file-list {
+    list-style: none;
+    padding: 0;
+}
+
+.file-list li {
+    margin: 1rem 0;
+}
+
+.file-list a {
+    font-size: 1.1rem;
+}
+
+.file-path {
+    color: #666;
+    font-size: 0.9rem;
+    margin-left: 0.5rem;
+}
+
+.empty {
+    color: #666;
+    font-style: italic;
+}
