@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -96,15 +97,22 @@ func addFile(filePath string) error {
 	return nil
 }
 
-// handleIndex serves either a specific file (if ?file= query param is present)
-// or an index page listing all tracked files
+// handleIndex serves either a specific file (if ?file= query param is present),
+// an index page listing all tracked files, or static assets relative to the Markdown file
 func handleIndex(w http.ResponseWriter, r *http.Request) {
+	filePath := r.URL.Query().Get("file")
+
+	// If path is not "/" and file parameter is present, try to serve as static asset
+	if r.URL.Path != "/" && filePath != "" {
+		handleStaticAsset(w, r, filePath)
+		return
+	}
+
+	// Path must be "/" for HTML pages
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
-
-	filePath := r.URL.Query().Get("file")
 
 	// If no file specified, show index page
 	if filePath == "" {
@@ -159,6 +167,85 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to execute file template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
+}
+
+// handleStaticAsset serves a static file relative to the Markdown file's directory
+func handleStaticAsset(w http.ResponseWriter, r *http.Request, markdownFilePath string) {
+	// Verify the markdown file is tracked
+	filesLock.RLock()
+	_, exists := files[markdownFilePath]
+	filesLock.RUnlock()
+
+	if !exists {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Get the requested asset path
+	// URL paths always start with /, so strip it first
+	assetPath := r.URL.Path[1:]
+	if assetPath == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	markdownDir := filepath.Dir(markdownFilePath)
+
+	// Try two interpretations:
+	// 1. Relative to markdown directory (most common)
+	// 2. Absolute filesystem path (for explicit absolute paths in markdown)
+
+	relativePath := filepath.Join(markdownDir, assetPath)
+	relativePath = filepath.Clean(relativePath)
+
+	absolutePath := filepath.Clean("/" + assetPath)
+
+	// Check which interpretation is valid (within directory AND file exists)
+	var fullAssetPath string
+	relativeValid := isPathWithinDirectory(relativePath, markdownDir)
+	absoluteValid := isPathWithinDirectory(absolutePath, markdownDir)
+
+	// Prefer the interpretation where the file actually exists
+	_, relativeExists := os.Stat(relativePath)
+	_, absoluteExists := os.Stat(absolutePath)
+
+	if relativeValid && relativeExists == nil {
+		// Relative interpretation: file exists
+		fullAssetPath = relativePath
+	} else if absoluteValid && absoluteExists == nil {
+		// Absolute interpretation: file exists
+		fullAssetPath = absolutePath
+	} else if relativeValid {
+		// Fall back to relative even if file doesn't exist (will 404 later)
+		fullAssetPath = relativePath
+	} else if absoluteValid {
+		// Fall back to absolute even if file doesn't exist (will 404 later)
+		fullAssetPath = absolutePath
+	} else {
+		// Neither interpretation is within allowed directory - return 404 to avoid leaking info
+		http.NotFound(w, r)
+		return
+	}
+
+	// Check if file exists
+	info, err := os.Stat(fullAssetPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Don't serve directories - return 404 to avoid leaking info
+	if info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Serve the file
+	http.ServeFile(w, r, fullAssetPath)
 }
 
 // renderIndexPage renders the index page listing all tracked files
@@ -342,4 +429,26 @@ func notifyIndexClients(message string) {
 		default:
 		}
 	}
+}
+
+// isPathWithinDirectory checks if path is within dir or its subdirectories
+func isPathWithinDirectory(path, dir string) bool {
+	// Get absolute paths
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+
+	// Ensure absDir ends with separator for proper prefix matching
+	if !os.IsPathSeparator(absDir[len(absDir)-1]) {
+		absDir += string(filepath.Separator)
+	}
+
+	// Check if absPath starts with absDir (meaning it's within the directory tree)
+	// Also allow exact match with the directory itself
+	return absPath == absDir[:len(absDir)-1] || len(absPath) >= len(absDir) && absPath[:len(absDir)] == absDir
 }
