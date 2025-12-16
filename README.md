@@ -1,3 +1,7 @@
+[![CI](https://github.com/Ch00k/lum/actions/workflows/build.yml/badge.svg)](https://github.com/Ch00k/lum/actions/workflows/build.yml)&nbsp;
+[![codecov](https://codecov.io/gh/Ch00k/lum/graph/badge.svg?token=5UwJHZOL5G)](https://codecov.io/gh/Ch00k/lum)&nbsp;
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/Ch00k/lum)](https://github.com/Ch00k/lum/releases/latest)
+
 # lum
 
 A command-line tool that starts a simple web server to display Markdown files rendered as HTML in the browser, with live reload on file changes.
