@@ -190,3 +190,71 @@ ul.contains-task-list li {
     color: #666;
     font-style: italic;
 }
+
+/* GitHub-style markdown alerts */
+.markdown-alert {
+    padding: 0.5rem 1rem;
+    margin-bottom: 1rem;
+    border-left: 4px solid;
+    color: #24292e;
+}
+
+.markdown-alert-title {
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.markdown-alert-title svg {
+    margin-right: 0.5rem;
+}
+
+.markdown-alert-note {
+    border-left-color: #0969da;
+}
+
+.markdown-alert-note .markdown-alert-title {
+    color: #0969da;
+}
+
+.markdown-alert-tip {
+    border-left-color: #16a34a;
+}
+
+.markdown-alert-tip .markdown-alert-title {
+    color: #16a34a;
+}
+
+.markdown-alert-important {
+    border-left-color: #8250df;
+}
+
+.markdown-alert-important .markdown-alert-title {
+    color: #8250df;
+}
+
+.markdown-alert-warning {
+    border-left-color: #9a6700;
+}
+
+.markdown-alert-warning .markdown-alert-title {
+    color: #9a6700;
+}
+
+.markdown-alert-caution {
+    border-left-color: #d1242f;
+}
+
+.markdown-alert-caution .markdown-alert-title {
+    color: #d1242f;
+}
+
+.markdown-alert p {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+}
+
+.markdown-alert p:last-child {
+    margin-bottom: 0;
+}

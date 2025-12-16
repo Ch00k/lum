@@ -9,7 +9,9 @@ import (
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/renderer/html"
+	"github.com/yuin/goldmark/util"
 )
 
 var md goldmark.Markdown
@@ -24,9 +26,15 @@ func init() {
 		),
 		goldmark.WithParserOptions(
 			parser.WithAutoHeadingID(),
+			parser.WithASTTransformers(
+				util.Prioritized(newAlertTransformer(), 100),
+			),
 		),
 		goldmark.WithRendererOptions(
 			html.WithUnsafe(),
+			renderer.WithNodeRenderers(
+				util.Prioritized(&alertRenderer{}, 100),
+			),
 		),
 	)
 }
