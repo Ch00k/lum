@@ -35,7 +35,7 @@ func TestMultiFileEndToEnd(t *testing.T) {
 	// Start server in background
 	done := make(chan error, 1)
 	go func() {
-		done <- startNewServer(port, file1)
+		done <- startDaemon(port, file1)
 	}()
 
 	// Give server time to start
@@ -211,7 +211,7 @@ func TestControlSocketProtocol(t *testing.T) {
 
 	// Start server
 	go func() {
-		_ = startNewServer(port, testFile)
+		_ = startDaemon(port, testFile)
 	}()
 
 	time.Sleep(500 * time.Millisecond)

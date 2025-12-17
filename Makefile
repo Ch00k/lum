@@ -2,29 +2,31 @@
 
 .EXPORT_ALL_VARIABLES:
 
-LUM_EXECUTABLE_FILENAME ?= lum
 LUM_BUILD_ARTIFACTS_DIR ?= dist
+LUM_EXECUTABLE_FILENAME ?= lum
+LUM_TEST_EXECUTABLE_FILENAME ?= lum.test
+LUM_TEST_EXECUTABLE ?= $(LUM_BUILD_ARTIFACTS_DIR)/$(LUM_TEST_EXECUTABLE_FILENAME)
 LUM_VERSION ?= dev
+GOCOVERDIR ?= $(CURDIR)/coverage
 
 lint:
 	golangci-lint run --fix
 	prettier --write "assets/"
 
-test:
+test: build-test
+	@mkdir -p coverage
 	gotestsum --format testname -- ./...
 
-test-verbose:
+test-verbose: test-binary
 	gotestsum --format standard-verbose -- -v -count=1 ./...
 
-test-one:
-	@if [ -z "$(TEST)" ]; then \
-		echo "Usage: make test-one TEST=TestName"; \
-		exit 1; \
-	fi
-	gotestsum --format standard-verbose -- -v -count=1 -run "^$(TEST)$$" ./...
+test-ci: build-test
+	@mkdir -p coverage
+	go run gotest.tools/gotestsum@latest --format testname -- -count=1 -coverprofile=coverage-unit.txt ./...
+	go tool covdata textfmt -i=$(GOCOVERDIR) -o=coverage-integration.txt
 
-test-ci:
-	go run gotest.tools/gotestsum@latest --format testname -- -coverprofile=coverage.txt ./...
+build-test:
+	go test -c -cover -o $(LUM_BUILD_ARTIFACTS_DIR)/$(LUM_TEST_EXECUTABLE_FILENAME)
 
 build:
 	go build -trimpath -ldflags="-s -w -X main.Version=${LUM_VERSION}" -o ./${LUM_BUILD_ARTIFACTS_DIR}/${LUM_EXECUTABLE_FILENAME} .

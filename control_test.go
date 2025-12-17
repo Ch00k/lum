@@ -379,7 +379,7 @@ func TestTryAddToExistingServer(t *testing.T) {
 
 		// Start server
 		go func() {
-			_ = startNewServer(port, testFile)
+			_ = startDaemon(port, testFile)
 		}()
 
 		time.Sleep(500 * time.Millisecond)
