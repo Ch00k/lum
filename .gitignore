@@ -1,3 +1,5 @@
 lum
 test.md
 coverage.*
+coverage/
+coverage-*.txt

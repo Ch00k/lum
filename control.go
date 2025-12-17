@@ -74,8 +74,8 @@ func startControlSocket(port int) error {
 }
 
 // handleControlCommand processes a single control command from a client connection.
-// Protocol: "ADD /absolute/path/to/file.md\n"
-// Response: "OK http://localhost:PORT/?file=/absolute/path/to/file.md\n" or "ERROR <message>\n"
+// Protocol: "ADD /absolute/path/to/file.md\n" or "STOP\n"
+// Response: "OK <url>\n" or "ERROR <message>\n"
 func handleControlCommand(conn net.Conn, port int) {
 	defer func() {
 		if err := conn.Close(); err != nil {
@@ -92,38 +92,55 @@ func handleControlCommand(conn net.Conn, port int) {
 
 	line = strings.TrimSpace(line)
 	parts := strings.SplitN(line, " ", 2)
+	command := parts[0]
 
-	if len(parts) != 2 || parts[0] != "ADD" {
-		if _, err := fmt.Fprintf(conn, "ERROR invalid command: expected 'ADD <path>'\n"); err != nil {
+	switch command {
+	case "STOP":
+		log.Println("Received STOP command, shutting down...")
+		if err := conn.Close(); err != nil {
+			log.Printf("Failed to close connection: %v", err)
+		}
+		cleanupSocket()
+		os.Exit(0)
+
+	case "ADD":
+		if len(parts) != 2 {
+			if _, err := fmt.Fprintf(conn, "ERROR invalid command: expected 'ADD <path>'\n"); err != nil {
+				log.Printf("Failed to write error response: %v", err)
+			}
+			return
+		}
+
+		filePath := parts[1]
+
+		// Validate file exists
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			if _, err := fmt.Fprintf(conn, "ERROR file does not exist: %s\n", filePath); err != nil {
+				log.Printf("Failed to write error response: %v", err)
+			}
+			return
+		}
+
+		// Add file to tracked files
+		if err := addFile(filePath); err != nil {
+			if _, err := fmt.Fprintf(conn, "ERROR failed to add file: %v\n", err); err != nil {
+				log.Printf("Failed to write error response: %v", err)
+			}
+			return
+		}
+
+		url := fmt.Sprintf("http://localhost:%d/?file=%s", port, filePath)
+		if _, err := fmt.Fprintf(conn, "OK %s\n", url); err != nil {
+			log.Printf("Failed to write success response: %v", err)
+			return
+		}
+		log.Printf("Added file via control socket: %s", filePath)
+
+	default:
+		if _, err := fmt.Fprintf(conn, "ERROR invalid command: expected 'ADD <path>' or 'STOP'\n"); err != nil {
 			log.Printf("Failed to write error response: %v", err)
 		}
-		return
 	}
-
-	filePath := parts[1]
-
-	// Validate file exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		if _, err := fmt.Fprintf(conn, "ERROR file does not exist: %s\n", filePath); err != nil {
-			log.Printf("Failed to write error response: %v", err)
-		}
-		return
-	}
-
-	// Add file to tracked files
-	if err := addFile(filePath); err != nil {
-		if _, err := fmt.Fprintf(conn, "ERROR failed to add file: %v\n", err); err != nil {
-			log.Printf("Failed to write error response: %v", err)
-		}
-		return
-	}
-
-	url := fmt.Sprintf("http://localhost:%d/?file=%s", port, filePath)
-	if _, err := fmt.Fprintf(conn, "OK %s\n", url); err != nil {
-		log.Printf("Failed to write success response: %v", err)
-		return
-	}
-	log.Printf("Added file via control socket: %s", filePath)
 }
 
 // tryAddToExistingServer attempts to add a file to an existing server instance via the control socket.
@@ -174,6 +191,40 @@ func tryAddToExistingServer(filePath string) (string, error) {
 	}
 
 	return "", fmt.Errorf("unexpected response: %s", response)
+}
+
+// setupLogFile creates and configures logging to a file in the runtime directory
+func setupLogFile() error {
+	var baseDir string
+
+	// Use same directory as socket
+	if xdgDir := os.Getenv("XDG_RUNTIME_DIR"); xdgDir != "" {
+		baseDir = filepath.Join(xdgDir, "lum")
+	} else {
+		uid := os.Getuid()
+		baseDir = filepath.Join(os.TempDir(), fmt.Sprintf("lum-%d", uid))
+	}
+
+	// Ensure directory exists
+	if err := os.MkdirAll(baseDir, 0o700); err != nil {
+		return fmt.Errorf("failed to create log directory: %w", err)
+	}
+
+	logPath := filepath.Join(baseDir, "lum.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+
+	log.SetOutput(logFile)
+	log.Printf("Daemon starting, logging to %s", logPath)
+
+	return nil
+}
+
+// dialSocket connects to the control socket
+func dialSocket(socketPath string) (net.Conn, error) {
+	return net.Dial("unix", socketPath)
 }
 
 // cleanupSocket removes the control socket on shutdown

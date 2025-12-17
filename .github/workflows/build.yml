@@ -51,6 +51,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage-unit.txt,./coverage-integration.txt
 
   release:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
