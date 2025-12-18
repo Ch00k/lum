@@ -221,9 +221,10 @@ func TestHandleControlCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		response := string(buf[:n])
-		if !contains(response, "ERROR") {
-			t.Errorf("Expected ERROR response, got: %s", response)
+		expectedResponse := "ERROR invalid command: expected 'ADD <path>'\n"
+		actualResponse := string(buf[:n])
+		if actualResponse != expectedResponse {
+			t.Errorf("Expected response:\n%q\nGot:\n%q", expectedResponse, actualResponse)
 		}
 	})
 
@@ -249,9 +250,10 @@ func TestHandleControlCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		response := string(buf[:n])
-		if !contains(response, "ERROR") {
-			t.Errorf("Expected ERROR response, got: %s", response)
+		expectedResponse := "ERROR invalid command: expected 'ADD <path>' or 'STOP'\n"
+		actualResponse := string(buf[:n])
+		if actualResponse != expectedResponse {
+			t.Errorf("Expected response:\n%q\nGot:\n%q", expectedResponse, actualResponse)
 		}
 	})
 
@@ -277,9 +279,10 @@ func TestHandleControlCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		response := string(buf[:n])
-		if !contains(response, "ERROR") || !contains(response, "does not exist") {
-			t.Errorf("Expected ERROR about non-existent file, got: %s", response)
+		expectedResponse := "ERROR file does not exist: /nonexistent/file.md\n"
+		actualResponse := string(buf[:n])
+		if actualResponse != expectedResponse {
+			t.Errorf("Expected response:\n%q\nGot:\n%q", expectedResponse, actualResponse)
 		}
 	})
 
@@ -305,12 +308,10 @@ func TestHandleControlCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		response := string(buf[:n])
-		if !contains(response, "OK") {
-			t.Errorf("Expected OK response, got: %s", response)
-		}
-		if !contains(response, testFile) {
-			t.Errorf("Expected response to contain file path, got: %s", response)
+		expectedResponse := fmt.Sprintf("OK http://localhost:%d/?file=%s\n", port, testFile)
+		actualResponse := string(buf[:n])
+		if actualResponse != expectedResponse {
+			t.Errorf("Expected response:\n%q\nGot:\n%q", expectedResponse, actualResponse)
 		}
 	})
 }
@@ -469,6 +470,125 @@ func TestCleanupSocket(t *testing.T) {
 
 		// Should not panic or error when socket doesn't exist
 		cleanupSocket()
+	})
+}
+
+func TestControlSocketErrorHandling(t *testing.T) {
+	t.Run("ADDCommandWithoutPath", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testFile := filepath.Join(tmpDir, "test.md")
+
+		if err := os.WriteFile(testFile, []byte("# Test"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		port := 16405
+
+		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
+		tmpRuntimeDir := t.TempDir()
+		if err := os.Setenv("XDG_RUNTIME_DIR", tmpRuntimeDir); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			cleanupSocket()
+			if oldXDG != "" {
+				_ = os.Setenv("XDG_RUNTIME_DIR", oldXDG)
+			} else {
+				_ = os.Unsetenv("XDG_RUNTIME_DIR")
+			}
+		})
+
+		go func() {
+			_ = startDaemon(port, testFile)
+		}()
+
+		time.Sleep(500 * time.Millisecond)
+
+		socketPath, err := getSocketPath()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		conn, err := net.Dial("unix", socketPath)
+		if err != nil {
+			t.Fatalf("Failed to connect: %v", err)
+		}
+		defer func() { _ = conn.Close() }()
+
+		// Send ADD without a path
+		if _, err := fmt.Fprintf(conn, "ADD\n"); err != nil {
+			t.Fatal(err)
+		}
+
+		buf := make([]byte, 1024)
+		n, err := conn.Read(buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		expectedResponse := "ERROR invalid command: expected 'ADD <path>'\n"
+		actualResponse := string(buf[:n])
+		if actualResponse != expectedResponse {
+			t.Errorf("Expected response:\n%q\nGot:\n%q", expectedResponse, actualResponse)
+		}
+	})
+
+	t.Run("GetSocketPathWithoutXDG", func(t *testing.T) {
+		// Unset XDG_RUNTIME_DIR to test fallback
+		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
+		if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if oldXDG != "" {
+				_ = os.Setenv("XDG_RUNTIME_DIR", oldXDG)
+			}
+		})
+
+		// Should fallback to /tmp/lum-$UID/control.sock
+		socketPath, err := getSocketPath()
+		if err != nil {
+			t.Fatalf("getSocketPath should not error on fallback: %v", err)
+		}
+
+		expectedPrefix := filepath.Join(os.TempDir(), fmt.Sprintf("lum-%d", os.Getuid()), "control.sock")
+		if socketPath != expectedPrefix {
+			t.Errorf("Expected socket path:\n%q\nGot:\n%q", expectedPrefix, socketPath)
+		}
+	})
+}
+
+func TestSetupLogFile(t *testing.T) {
+	t.Run("CreatesLogFile", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
+		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if oldXDG != "" {
+				_ = os.Setenv("XDG_RUNTIME_DIR", oldXDG)
+			} else {
+				_ = os.Unsetenv("XDG_RUNTIME_DIR")
+			}
+		})
+
+		err := setupLogFile()
+		if err != nil {
+			t.Fatalf("setupLogFile failed: %v", err)
+		}
+
+		// Verify log directory was created
+		logDir := filepath.Join(tmpDir, "lum")
+		if _, err := os.Stat(logDir); os.IsNotExist(err) {
+			t.Error("Log directory should be created")
+		}
+
+		// Verify log file exists
+		logPath := filepath.Join(logDir, "lum.log")
+		if _, err := os.Stat(logPath); os.IsNotExist(err) {
+			t.Error("Log file should be created")
+		}
 	})
 }
 

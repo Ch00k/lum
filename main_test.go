@@ -370,3 +370,99 @@ This is **bold** and this is *italic*.
 	delete(files, testFile)
 	filesLock.Unlock()
 }
+
+// TestStartOneOff tests the one-off mode server startup
+func TestStartOneOff(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.md")
+
+	if err := os.WriteFile(testFile, []byte("# Test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	port := 16400
+
+	// Start server in goroutine
+	done := make(chan error, 1)
+	go func() {
+		done <- startOneOff(port, testFile)
+	}()
+
+	// Give server time to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify server is responding
+	url := fmt.Sprintf("http://localhost:%d/?file=%s", port, testFile)
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("Failed to connect to server: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Cleanup
+	filesLock.Lock()
+	if fs, ok := files[testFile]; ok {
+		if fs.watcher != nil {
+			_ = fs.watcher.Close()
+		}
+		delete(files, testFile)
+	}
+	filesLock.Unlock()
+}
+
+// TestRunErrorPaths tests error handling in run()
+func TestRunErrorPaths(t *testing.T) {
+	t.Run("NoArguments", func(t *testing.T) {
+		opts, args, err := parseArgs([]string{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify parsing result
+		if len(args) == 1 || opts.help || opts.stop || opts.daemon {
+			t.Error("Expected no args and no flags set")
+		}
+	})
+
+	t.Run("StopDaemonWhenNoneRunning", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
+				t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
+			}
+		}()
+
+		err := stopDaemon()
+		if err == nil {
+			t.Error("Expected error when stopping non-existent daemon")
+		}
+		expectedError := "no daemon running"
+		if err.Error() != expectedError {
+			t.Errorf("Expected error %q, got: %q", expectedError, err.Error())
+		}
+	})
+
+	t.Run("DaemonExistsCheck", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
+				t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
+			}
+		}()
+
+		// No daemon should exist
+		if daemonExists() {
+			t.Error("daemonExists should return false when no daemon running")
+		}
+	})
+}

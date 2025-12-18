@@ -363,9 +363,10 @@ func TestIntegrationInvalidFile(t *testing.T) {
 		t.Error("Expected binary to exit with error for nonexistent file")
 	}
 
-	outputStr := string(output)
-	if !contains(outputStr, "does not exist") && !contains(outputStr, "no such file") {
-		t.Errorf("Expected error message about nonexistent file, got: %s", outputStr)
+	expectedOutput := "File does not exist: /nonexistent/file.md\n"
+	actualOutput := string(output)
+	if !strings.HasPrefix(actualOutput, expectedOutput) {
+		t.Errorf("Expected error message to start with:\n%q\nGot:\n%q", expectedOutput, actualOutput)
 	}
 }
 
@@ -384,8 +385,25 @@ func TestIntegrationHelp(t *testing.T) {
 		t.Fatalf("Failed to run help: %v", err)
 	}
 
-	outputStr := string(output)
-	if !contains(outputStr, "Usage:") {
-		t.Error("Expected help output to contain 'Usage:'")
+	expectedOutput := `Usage: lum [OPTIONS] [FILE]
+
+Render Markdown files in a web browser with live reload.
+
+Options:
+  -p, --port PORT     Port to run the server on (default: 6333)
+  -d, --daemon        Run as daemon (allows serving multiple files)
+  -s, --stop          Stop the running daemon
+  -h, --help          Show this help message
+
+Examples:
+  lum file.md              Serve file in one-off mode
+  lum --daemon             Start daemon with no files
+  lum --daemon file.md     Start daemon with initial file
+  lum file.md              Add file to existing daemon (if running)
+  lum --stop               Stop the daemon
+`
+	actualOutput := string(output)
+	if !strings.HasPrefix(actualOutput, expectedOutput) {
+		t.Errorf("Expected help output to start with:\n%q\nGot:\n%q", expectedOutput, actualOutput)
 	}
 }

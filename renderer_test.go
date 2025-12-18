@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,8 +216,9 @@ Inline ` + "`code`" + ` here.
 			t.Error("Expected error when rendering untracked file")
 		}
 
-		if !strings.Contains(err.Error(), "not tracked") {
-			t.Errorf("Expected 'not tracked' error, got: %v", err)
+		expectedError := fmt.Sprintf("file not tracked: %s", testFile)
+		if err.Error() != expectedError {
+			t.Errorf("Expected error:\n%q\nGot:\n%q", expectedError, err.Error())
 		}
 	})
 
