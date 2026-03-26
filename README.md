@@ -16,6 +16,7 @@ A command-line tool that starts a simple web server to display Markdown files re
 - **File watching**: Intelligent file monitoring with [fsnotify](https://github.com/fsnotify/fsnotify)
 - **GitHub Flavored Markdown**: Tables, task lists, strikethrough, alerts, and more
 - **Index page**: Browse all tracked files from a single page
+- **Static asset serving**: Images and other files referenced in Markdown are served relative to the file's directory
 - **Minimal styling**: Clean, readable CSS
 - **Single binary**: All assets embedded, no external dependencies
 
@@ -34,7 +35,7 @@ Options:
   -p, --port PORT     Port to run the server on (default: 6333)
   -d, --daemon        Run as daemon (allows serving multiple files)
   -s, --stop          Stop the running daemon
-  -h, --help          Show help message
+  -h, --help          Show this help message
 ```
 
 ### One-Off Mode
@@ -67,7 +68,7 @@ lum --daemon README.md
 
 The daemon:
 - Runs in the background (detaches from terminal)
-- Logs to `$XDG_RUNTIME_DIR/lum/lum.log` (typically `/run/user/$UID/lum/lum.log`)
+- Logs to `$XDG_RUNTIME_DIR/lum/lum.log` (typically `/run/user/$UID/lum/lum.log`), or `/tmp/lum-$UID/lum.log` if `XDG_RUNTIME_DIR` is not set
 - Allows adding multiple files
 - Persists until explicitly stopped
 
