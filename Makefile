@@ -32,7 +32,7 @@ build:
 	go build -trimpath -ldflags="-s -w -X main.Version=${LUM_VERSION}" -o ./${LUM_BUILD_ARTIFACTS_DIR}/${LUM_EXECUTABLE_FILENAME} .
 
 run:
-	go run . test.md
+	go run . --port 16333 README.md
 
 release:
 	@echo "Available release types:"
