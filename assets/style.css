@@ -17,6 +17,44 @@ body {
     padding: 2rem 1rem;
 }
 
+.container.w1200 {
+    max-width: 1200px;
+}
+
+.width-switcher {
+    position: fixed;
+    top: 0.75rem;
+    right: 0.75rem;
+    display: flex;
+    gap: 2px;
+    background: #f0f0f0;
+    border-radius: 4px;
+    padding: 2px;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+}
+
+.width-switcher:hover {
+    opacity: 1;
+}
+
+.width-switcher button {
+    background: none;
+    border: none;
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #666;
+    font-family: inherit;
+}
+
+.width-switcher button.active {
+    background: #fff;
+    color: #24292e;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
 h1,
 h2,
 h3,
