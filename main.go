@@ -150,6 +150,12 @@ func run() int {
 				return 1
 			}
 			// Parent process exits here
+			addr := fmt.Sprintf("127.0.0.1:%d", port)
+			if initialFile != "" {
+				fmt.Printf("http://%s/?file=%s\n", addr, initialFile)
+			} else {
+				fmt.Printf("http://%s\n", addr)
+			}
 			return 0
 		}
 
