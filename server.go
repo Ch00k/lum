@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +22,7 @@ var assets embed.FS
 // FileState holds the state for a single tracked markdown file
 type FileState struct {
 	path        string
+	source      []byte
 	htmlContent []byte
 	contentLock sync.RWMutex
 	watcher     *fsnotify.Watcher
@@ -37,8 +40,9 @@ var (
 	indexSSEClients     = make(map[chan string]bool)
 	indexSSEClientsLock sync.RWMutex
 
-	fileTemplate  *template.Template
-	indexTemplate *template.Template
+	fileTemplate   *template.Template
+	indexTemplate  *template.Template
+	exportTemplate *template.Template
 )
 
 func init() {
@@ -55,6 +59,13 @@ func init() {
 		log.Fatalf("Failed to read index template: %v", err)
 	}
 	indexTemplate = template.Must(template.New("index").Parse(string(indexContent)))
+
+	// Load export template
+	exportContent, err := assets.ReadFile("assets/export.html")
+	if err != nil {
+		log.Fatalf("Failed to read export template: %v", err)
+	}
+	exportTemplate = template.Must(template.New("export").Parse(string(exportContent)))
 }
 
 // addFile adds a new file to the tracked files, renders it, and starts watching it.
@@ -166,6 +177,67 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if err := fileTemplate.Execute(w, data); err != nil {
 		log.Printf("Failed to execute file template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+// scriptCloseTag matches the </script sequence in any case; HTML treats
+// script end tags case-insensitively.
+var scriptCloseTag = regexp.MustCompile(`(?i)<(/script)`)
+
+// handleExport serves a self-contained HTML snapshot of a tracked file:
+// embedded CSS, the rendered HTML, and the original Markdown source inside
+// <script type="text/markdown">. The </script sequence (in any case) is
+// escaped to <\/script, preserving the original case, so the script block
+// can't be closed early by the embedded content.
+func handleExport(w http.ResponseWriter, r *http.Request) {
+	filePath := r.URL.Query().Get("file")
+	if filePath == "" {
+		http.Error(w, "Missing file parameter", http.StatusBadRequest)
+		return
+	}
+
+	filesLock.RLock()
+	fileState, exists := files[filePath]
+	filesLock.RUnlock()
+
+	if !exists {
+		http.NotFound(w, r)
+		return
+	}
+
+	fileState.contentLock.RLock()
+	content := fileState.htmlContent
+	source := fileState.source
+	fileState.contentLock.RUnlock()
+
+	cssContent, err := assets.ReadFile("assets/style.css")
+	if err != nil {
+		log.Printf("Failed to read CSS: %v", err)
+		cssContent = []byte("")
+	}
+
+	escapedSource := scriptCloseTag.ReplaceAll(source, []byte("<\\$1"))
+
+	baseName := filepath.Base(filePath)
+	downloadName := strings.TrimSuffix(baseName, filepath.Ext(baseName)) + ".html"
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, downloadName))
+
+	data := struct {
+		Title   string
+		CSS     template.CSS
+		Content template.HTML
+		Source  template.HTML
+	}{
+		Title:   baseName,
+		CSS:     template.CSS(cssContent),
+		Content: template.HTML(content),
+		Source:  template.HTML(escapedSource),
+	}
+
+	if err := exportTemplate.Execute(w, data); err != nil {
+		log.Printf("Failed to execute export template: %v", err)
 	}
 }
 

@@ -206,6 +206,9 @@ func TestHandleIndex(t *testing.T) {
 		if !strings.Contains(body, "Test Content") {
 			t.Error("Page should contain rendered content")
 		}
+		if !strings.Contains(body, `class="save-button"`) || !strings.Contains(body, "/export?file=") {
+			t.Error("Page should contain Save button linking to /export")
+		}
 
 		// Cleanup
 		filesLock.Lock()
@@ -742,5 +745,158 @@ func TestHandleIndexSSE(t *testing.T) {
 	t.Run("ReceivesNotifications", func(t *testing.T) {
 		// This is tested in the integration test TestMultiFileEndToEnd
 		// where we verify the index page SSE receives updates when files are added
+	})
+}
+
+func TestHandleExport(t *testing.T) {
+	t.Run("MissingFileParam", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/export", nil)
+		w := httptest.NewRecorder()
+
+		handleExport(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+	})
+
+	t.Run("UntrackedFile", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/export?file=/nonexistent.md", nil)
+		w := httptest.NewRecorder()
+
+		handleExport(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("Expected status 404, got %d", w.Code)
+		}
+	})
+
+	t.Run("ExportsSelfContainedHTML", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testFile := filepath.Join(tmpDir, "doc.md")
+
+		source := "# Hello\n\nA paragraph with <em>HTML</em> & special chars.\n"
+		if err := os.WriteFile(testFile, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		filesLock.Lock()
+		files[testFile] = &FileState{
+			path:       testFile,
+			sseClients: make(map[chan string]bool),
+		}
+		filesLock.Unlock()
+		defer func() {
+			filesLock.Lock()
+			delete(files, testFile)
+			filesLock.Unlock()
+		}()
+
+		if err := renderMarkdown(testFile); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest("GET", "/export?file="+testFile, nil)
+		w := httptest.NewRecorder()
+
+		handleExport(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", w.Code)
+		}
+
+		body := w.Body.String()
+
+		// Rendered HTML should be present
+		if !strings.Contains(body, "<h1") || !strings.Contains(body, "Hello") {
+			t.Error("Exported HTML should contain rendered content")
+		}
+
+		// CSS should be inlined
+		if !strings.Contains(body, ".container") {
+			t.Error("Exported HTML should contain inlined CSS")
+		}
+
+		// Source must be embedded verbatim inside the script tag with no
+		// surrounding whitespace — a single leading space or newline would
+		// corrupt the first line of the markdown (e.g. turn "# Hello" into an
+		// indented paragraph).
+		_, after, found := strings.Cut(body, `<script type="text/markdown" id="lum-source">`)
+		if !found {
+			t.Fatal("Exported HTML should contain markdown source script tag")
+		}
+		got, _, found := strings.Cut(after, "</script>")
+		if !found {
+			t.Fatal("Source script tag never closes")
+		}
+		if got != source {
+			t.Errorf("Embedded source must equal original byte-for-byte.\n got: %q\nwant: %q", got, source)
+		}
+
+		// Live-reload script must NOT be present
+		if strings.Contains(body, "EventSource") {
+			t.Error("Exported HTML should not contain live-reload script")
+		}
+
+		// Headers
+		result := w.Result()
+		if cd := result.Header.Get("Content-Disposition"); !strings.Contains(cd, `filename="doc.html"`) {
+			t.Errorf("Expected Content-Disposition with doc.html, got %q", cd)
+		}
+	})
+
+	t.Run("EscapesScriptCloseInSource", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testFile := filepath.Join(tmpDir, "scripty.md")
+
+		// Markdown that documents </script> tags in a code block; HTML
+		// matches script end tags case-insensitively, so uppercase and
+		// mixed-case variants must be escaped too
+		source := "# Code\n\n    </script>\n    </SCRIPT>\n    </ScRiPt>\n"
+		if err := os.WriteFile(testFile, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		filesLock.Lock()
+		files[testFile] = &FileState{
+			path:       testFile,
+			sseClients: make(map[chan string]bool),
+		}
+		filesLock.Unlock()
+		defer func() {
+			filesLock.Lock()
+			delete(files, testFile)
+			filesLock.Unlock()
+		}()
+
+		if err := renderMarkdown(testFile); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest("GET", "/export?file="+testFile, nil)
+		w := httptest.NewRecorder()
+
+		handleExport(w, req)
+
+		body := w.Body.String()
+
+		// The embedded source must not contain a raw </script in any case
+		// that would close the surrounding script block early.
+		_, afterOpen, found := strings.Cut(body, `<script type="text/markdown" id="lum-source">`)
+		if !found {
+			t.Fatal("Source script tag missing")
+		}
+		inner, _, found := strings.Cut(afterOpen, "</script>")
+		if !found {
+			t.Fatal("Source script tag never closes")
+		}
+		if strings.Contains(strings.ToLower(inner), "</script") {
+			t.Error("Embedded source must not contain </script (any case) before the closing tag")
+		}
+		for _, escaped := range []string{`<\/script`, `<\/SCRIPT`, `<\/ScRiPt`} {
+			if !strings.Contains(inner, escaped) {
+				t.Errorf("Embedded source should contain escaped %s sequence", escaped)
+			}
+		}
 	})
 }

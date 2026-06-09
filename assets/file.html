@@ -9,9 +9,12 @@
         </style>
     </head>
     <body>
-        <div class="width-switcher">
-            <button data-width="900">900</button>
-            <button data-width="1200">1200</button>
+        <div class="toolbar">
+            <a class="save-button" href="/export?file={{.File}}" download>Save</a>
+            <div class="width-switcher">
+                <button data-width="900">900</button>
+                <button data-width="1200">1200</button>
+            </div>
         </div>
         <div class="container">{{.Content}}</div>
         <script>
