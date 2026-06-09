@@ -63,6 +63,7 @@ func renderMarkdown(filePath string) error {
 
 	// Update the HTML content with the file's lock
 	fileState.contentLock.Lock()
+	fileState.source = content
 	fileState.htmlContent = buf.Bytes()
 	fileState.contentLock.Unlock()
 
