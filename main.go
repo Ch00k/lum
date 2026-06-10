@@ -151,11 +151,12 @@ func run() int {
 			}
 			// Parent process exits here
 			addr := fmt.Sprintf("127.0.0.1:%d", port)
+			url := fmt.Sprintf("http://%s", addr)
 			if initialFile != "" {
-				fmt.Printf("http://%s/?file=%s\n", addr, initialFile)
-			} else {
-				fmt.Printf("http://%s\n", addr)
+				url = fmt.Sprintf("http://%s/?file=%s", addr, initialFile)
 			}
+			fmt.Println(url)
+			openBrowserWhenReady(addr, url)
 			return 0
 		}
 
@@ -195,6 +196,7 @@ func run() int {
 	if err == nil {
 		// Added to existing daemon
 		fmt.Println(url)
+		openBrowser(url)
 		return 0
 	}
 
@@ -380,6 +382,7 @@ func startOneOff(port int, filePath string) error {
 	// Port is available, print URL
 	url := fmt.Sprintf("http://%s/?file=%s", addr, filePath)
 	fmt.Println(url)
+	openBrowser(url)
 
 	// Start serving
 	if err := http.Serve(listener, mux); err != nil {

@@ -12,6 +12,7 @@ A command-line tool that starts a simple web server to display Markdown files re
 - **Server-side rendering**: Markdown to HTML conversion with [goldmark](https://github.com/yuin/goldmark)
 - **Syntax highlighting**: Code blocks styled with [goldmark-highlighting](https://github.com/yuin/goldmark-highlighting)
 - **Live reload**: Automatic browser refresh on file changes via Server-Sent Events (SSE)
+- **Browser auto-open**: Opens the URL in your default browser, skipped on headless systems
 - **Multiple file support**: Serve multiple Markdown files from a single daemon instance
 - **File watching**: Intelligent file monitoring with [fsnotify](https://github.com/fsnotify/fsnotify)
 - **GitHub Flavored Markdown**: Tables, task lists, strikethrough, alerts, and more
@@ -105,6 +106,10 @@ lum --stop
 # or
 lum -s
 ```
+
+### Browser Auto-Open
+
+Whenever lum prints a URL, it also tries to open it in your default browser (`xdg-open` on Linux, `open` on macOS). This is skipped when no browser is expected to be available: on headless systems (no `DISPLAY` or `WAYLAND_DISPLAY` on Linux) or when the opener is not installed. To disable it entirely, set the `LUM_NO_BROWSER` environment variable to any non-empty value.
 
 ### Custom Port
 
