@@ -22,7 +22,15 @@ A command-line tool that starts a simple web server to display Markdown files re
 
 ## Installation
 
-Download an executable for your operating system from the [releases page](https://github.com/Ch00k/lum/releases/).
+Run the install script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ch00k/lum/main/install.sh | sh
+```
+
+It detects your OS and architecture (Linux/macOS, amd64/arm64), downloads the latest release, and installs it as `lum` into the first of `~/.local/bin`, `~/bin`, or `/usr/local/bin` that exists, is writable, and is in your `PATH`.
+
+Alternatively, download an executable for your operating system from the [releases page](https://github.com/Ch00k/lum/releases/), rename it to `lum`, make it executable, and put it into a directory in your `PATH`.
 
 ## Usage
 
