@@ -266,14 +266,7 @@ func daemonExists() bool {
 	if err != nil {
 		return false
 	}
-
-	// Try to connect to the socket to verify daemon is actually running
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
+	return socketIsLive(socketPath)
 }
 
 // stopDaemon sends a STOP command to the running daemon

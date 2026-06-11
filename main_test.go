@@ -15,6 +15,9 @@ import (
 
 // TestMultiFileEndToEnd tests the complete multi-file workflow
 func TestMultiFileEndToEnd(t *testing.T) {
+	// Isolate the control socket and log file from any live daemon
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+
 	// Create temporary directory for test files
 	tmpDir := t.TempDir()
 
@@ -200,6 +203,9 @@ func TestMultiFileEndToEnd(t *testing.T) {
 
 // TestControlSocketProtocol tests the control socket protocol
 func TestControlSocketProtocol(t *testing.T) {
+	// Isolate the control socket and log file from any live daemon
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.md")
 
@@ -429,15 +435,7 @@ func TestRunErrorPaths(t *testing.T) {
 	})
 
 	t.Run("StopDaemonWhenNoneRunning", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
-			t.Fatal(err)
-		}
-		defer func() {
-			if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-				t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
-			}
-		}()
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 
 		err := stopDaemon()
 		if err == nil {
@@ -450,15 +448,7 @@ func TestRunErrorPaths(t *testing.T) {
 	})
 
 	t.Run("DaemonExistsCheck", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
-			t.Fatal(err)
-		}
-		defer func() {
-			if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-				t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
-			}
-		}()
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 
 		// No daemon should exist
 		if daemonExists() {

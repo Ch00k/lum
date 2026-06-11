@@ -12,23 +12,8 @@ import (
 
 func TestGetSocketPath(t *testing.T) {
 	t.Run("WithXDGRuntimeDir", func(t *testing.T) {
-		// Set XDG_RUNTIME_DIR
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
 		tmpDir := t.TempDir()
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if oldXDG != "" {
-				if err := os.Setenv("XDG_RUNTIME_DIR", oldXDG); err != nil {
-					t.Logf("Failed to restore XDG_RUNTIME_DIR: %v", err)
-				}
-			} else {
-				if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-					t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
-				}
-			}
-		})
+		t.Setenv("XDG_RUNTIME_DIR", tmpDir)
 
 		socketPath, err := getSocketPath()
 		if err != nil {
@@ -46,18 +31,8 @@ func TestGetSocketPath(t *testing.T) {
 	})
 
 	t.Run("WithoutXDGRuntimeDir", func(t *testing.T) {
-		// Unset XDG_RUNTIME_DIR
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-		if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if oldXDG != "" {
-				if err := os.Setenv("XDG_RUNTIME_DIR", oldXDG); err != nil {
-					t.Logf("Failed to restore XDG_RUNTIME_DIR: %v", err)
-				}
-			}
-		})
+		// Empty XDG_RUNTIME_DIR triggers the same fallback as unset
+		t.Setenv("XDG_RUNTIME_DIR", "")
 
 		socketPath, err := getSocketPath()
 		if err != nil {
@@ -86,23 +61,8 @@ func TestStartControlSocket(t *testing.T) {
 		port := 16400
 
 		// Use a unique socket path for this test
-		tmpDir := t.TempDir()
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			cleanupSocket()
-			if oldXDG != "" {
-				if err := os.Setenv("XDG_RUNTIME_DIR", oldXDG); err != nil {
-					t.Logf("Failed to restore XDG_RUNTIME_DIR: %v", err)
-				}
-			} else {
-				if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-					t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
-				}
-			}
-		})
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+		t.Cleanup(cleanupSocket)
 
 		err := startControlSocket(port)
 		if err != nil {
@@ -126,23 +86,8 @@ func TestStartControlSocket(t *testing.T) {
 	t.Run("RestartsWithExistingSocket", func(t *testing.T) {
 		port := 16401
 
-		tmpDir := t.TempDir()
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			cleanupSocket()
-			if oldXDG != "" {
-				if err := os.Setenv("XDG_RUNTIME_DIR", oldXDG); err != nil {
-					t.Logf("Failed to restore XDG_RUNTIME_DIR: %v", err)
-				}
-			} else {
-				if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-					t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
-				}
-			}
-		})
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+		t.Cleanup(cleanupSocket)
 
 		// Start first socket
 		err := startControlSocket(port)
@@ -161,6 +106,53 @@ func TestStartControlSocket(t *testing.T) {
 			t.Fatalf("Failed to restart control socket: %v", err)
 		}
 	})
+
+	// A live listener on the socket belongs to another daemon and must not be hijacked.
+	t.Run("RefusesWhenSocketLive", func(t *testing.T) {
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+		t.Cleanup(cleanupSocket)
+
+		if err := startControlSocket(16406); err != nil {
+			t.Fatalf("Failed to start first control socket: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+
+		err := startControlSocket(16407)
+		if err == nil {
+			t.Fatal("Expected error when the socket is in use by a live daemon")
+		}
+		if !strings.Contains(err.Error(), "already running") {
+			t.Errorf("Expected 'already running' error, got: %v", err)
+		}
+	})
+
+	// A socket file with no listener (unclean shutdown) is removed and replaced.
+	t.Run("RemovesStaleSocket", func(t *testing.T) {
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+		t.Cleanup(cleanupSocket)
+
+		socketPath, err := getSocketPath()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Leave a socket file behind with nothing listening on it
+		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener.SetUnlinkOnClose(false)
+		if err := listener.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(socketPath); err != nil {
+			t.Fatalf("Stale socket file should exist: %v", err)
+		}
+
+		if err := startControlSocket(16408); err != nil {
+			t.Fatalf("Expected stale socket to be replaced, got error: %v", err)
+		}
+	})
 }
 
 func TestHandleControlCommand(t *testing.T) {
@@ -174,23 +166,8 @@ func TestHandleControlCommand(t *testing.T) {
 	port := 16402
 
 	// Setup environment
-	tmpRuntimeDir := t.TempDir()
-	oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-	if err := os.Setenv("XDG_RUNTIME_DIR", tmpRuntimeDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cleanupSocket()
-		if oldXDG != "" {
-			if err := os.Setenv("XDG_RUNTIME_DIR", oldXDG); err != nil {
-				t.Logf("Failed to restore XDG_RUNTIME_DIR: %v", err)
-			}
-		} else {
-			if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-				t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
-			}
-		}
-	})
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Cleanup(cleanupSocket)
 
 	// Start control socket
 	if err := startControlSocket(port); err != nil {
@@ -326,22 +303,7 @@ func TestTryAddToExistingServer(t *testing.T) {
 		}
 
 		// Use a unique socket path
-		tmpRuntimeDir := t.TempDir()
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpRuntimeDir); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if oldXDG != "" {
-				if err := os.Setenv("XDG_RUNTIME_DIR", oldXDG); err != nil {
-					t.Logf("Failed to restore XDG_RUNTIME_DIR: %v", err)
-				}
-			} else {
-				if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-					t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
-				}
-			}
-		})
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 
 		_, err := tryAddToExistingServer(testFile)
 		if err == nil {
@@ -360,23 +322,8 @@ func TestTryAddToExistingServer(t *testing.T) {
 		port := 16403
 
 		// Setup environment
-		tmpRuntimeDir := t.TempDir()
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpRuntimeDir); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			cleanupSocket()
-			if oldXDG != "" {
-				if err := os.Setenv("XDG_RUNTIME_DIR", oldXDG); err != nil {
-					t.Logf("Failed to restore XDG_RUNTIME_DIR: %v", err)
-				}
-			} else {
-				if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-					t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
-				}
-			}
-		})
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+		t.Cleanup(cleanupSocket)
 
 		// Start server
 		go func() {
@@ -407,22 +354,7 @@ func TestTryAddToExistingServer(t *testing.T) {
 
 func TestCleanupSocket(t *testing.T) {
 	t.Run("RemovesSocket", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if oldXDG != "" {
-				if err := os.Setenv("XDG_RUNTIME_DIR", oldXDG); err != nil {
-					t.Logf("Failed to restore XDG_RUNTIME_DIR: %v", err)
-				}
-			} else {
-				if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-					t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
-				}
-			}
-		})
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 
 		// Start a socket
 		port := 16404
@@ -451,22 +383,7 @@ func TestCleanupSocket(t *testing.T) {
 	})
 
 	t.Run("NoErrorWhenSocketDoesNotExist", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if oldXDG != "" {
-				if err := os.Setenv("XDG_RUNTIME_DIR", oldXDG); err != nil {
-					t.Logf("Failed to restore XDG_RUNTIME_DIR: %v", err)
-				}
-			} else {
-				if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-					t.Logf("Failed to unset XDG_RUNTIME_DIR: %v", err)
-				}
-			}
-		})
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 
 		// Should not panic or error when socket doesn't exist
 		cleanupSocket()
@@ -484,19 +401,8 @@ func TestControlSocketErrorHandling(t *testing.T) {
 
 		port := 16405
 
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-		tmpRuntimeDir := t.TempDir()
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpRuntimeDir); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			cleanupSocket()
-			if oldXDG != "" {
-				_ = os.Setenv("XDG_RUNTIME_DIR", oldXDG)
-			} else {
-				_ = os.Unsetenv("XDG_RUNTIME_DIR")
-			}
-		})
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+		t.Cleanup(cleanupSocket)
 
 		go func() {
 			_ = startDaemon(port, testFile)
@@ -534,16 +440,8 @@ func TestControlSocketErrorHandling(t *testing.T) {
 	})
 
 	t.Run("GetSocketPathWithoutXDG", func(t *testing.T) {
-		// Unset XDG_RUNTIME_DIR to test fallback
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-		if err := os.Unsetenv("XDG_RUNTIME_DIR"); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if oldXDG != "" {
-				_ = os.Setenv("XDG_RUNTIME_DIR", oldXDG)
-			}
-		})
+		// Empty XDG_RUNTIME_DIR triggers the same fallback as unset
+		t.Setenv("XDG_RUNTIME_DIR", "")
 
 		// Should fallback to /tmp/lum-$UID/control.sock
 		socketPath, err := getSocketPath()
@@ -561,17 +459,7 @@ func TestControlSocketErrorHandling(t *testing.T) {
 func TestSetupLogFile(t *testing.T) {
 	t.Run("CreatesLogFile", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		oldXDG := os.Getenv("XDG_RUNTIME_DIR")
-		if err := os.Setenv("XDG_RUNTIME_DIR", tmpDir); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if oldXDG != "" {
-				_ = os.Setenv("XDG_RUNTIME_DIR", oldXDG)
-			} else {
-				_ = os.Unsetenv("XDG_RUNTIME_DIR")
-			}
-		})
+		t.Setenv("XDG_RUNTIME_DIR", tmpDir)
 
 		err := setupLogFile()
 		if err != nil {
