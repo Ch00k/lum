@@ -42,7 +42,11 @@ func startControlSocket(port int) error {
 		return fmt.Errorf("failed to get socket path: %w", err)
 	}
 
-	// Remove existing socket if it exists (in case of unclean shutdown)
+	// A live listener on the socket means another daemon is running. Only a
+	// stale socket file (left over from an unclean shutdown) is removed.
+	if socketIsLive(socketPath) {
+		return fmt.Errorf("another daemon is already running (socket %s)", socketPath)
+	}
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove existing socket: %w", err)
 	}
@@ -225,6 +229,16 @@ func setupLogFile() error {
 // dialSocket connects to the control socket
 func dialSocket(socketPath string) (net.Conn, error) {
 	return net.Dial("unix", socketPath)
+}
+
+// socketIsLive reports whether something is accepting connections on the control socket
+func socketIsLive(socketPath string) bool {
+	conn, err := dialSocket(socketPath)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // cleanupSocket removes the control socket on shutdown
