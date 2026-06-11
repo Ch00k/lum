@@ -44,7 +44,7 @@ body {
     opacity: 1;
 }
 
-.save-button {
+.export-button {
     background: #f0f0f0;
     border-radius: 4px;
     padding: 4px 10px;
@@ -56,7 +56,7 @@ body {
     transition: opacity 0.2s;
 }
 
-.save-button:hover {
+.export-button:hover {
     opacity: 1;
     text-decoration: none;
 }

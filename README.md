@@ -17,6 +17,7 @@ A command-line tool that starts a simple web server to display Markdown files re
 - **File watching**: Intelligent file monitoring with [fsnotify](https://github.com/fsnotify/fsnotify)
 - **GitHub Flavored Markdown**: Tables, task lists, strikethrough, alerts, and more
 - **Index page**: Browse all tracked files from a single page
+- **HTML export**: Download any file as a self-contained HTML snapshot, keeping the selected viewport width
 - **Static asset serving**: Images and other files referenced in Markdown are served relative to the file's directory
 - **Minimal styling**: Clean, readable CSS
 - **Single binary**: All assets embedded, no external dependencies
