@@ -8,6 +8,7 @@ evtSource.onmessage = function (event) {
 (function () {
     var container = document.querySelector('.container');
     var buttons = document.querySelectorAll('.width-switcher button');
+    var exportLink = document.querySelector('.export-button');
     var stored = localStorage.getItem('lum-width');
 
     function setWidth(width) {
@@ -17,6 +18,11 @@ evtSource.onmessage = function (event) {
             container.classList.remove('w1200');
         }
         localStorage.setItem('lum-width', width);
+        // Record the selected width in the export link so the exported HTML
+        // keeps the same viewport width
+        var url = new URL(exportLink.href);
+        url.searchParams.set('width', width);
+        exportLink.href = url;
         buttons.forEach(function (btn) {
             btn.classList.toggle('active', btn.getAttribute('data-width') === width);
         });

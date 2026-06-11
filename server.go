@@ -189,6 +189,8 @@ var scriptCloseTag = regexp.MustCompile(`(?i)<(/script)`)
 // <script type="text/markdown">. The </script sequence (in any case) is
 // escaped to <\/script, preserving the original case, so the script block
 // can't be closed early by the embedded content.
+// The width query parameter records the viewport width selected in the file
+// view, baking the corresponding container class into the snapshot.
 func handleExport(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("file")
 	if filePath == "" {
@@ -218,6 +220,11 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 
 	escapedSource := scriptCloseTag.ReplaceAll(source, []byte("<\\$1"))
 
+	containerClass := "container"
+	if r.URL.Query().Get("width") == "1200" {
+		containerClass += " w1200"
+	}
+
 	baseName := filepath.Base(filePath)
 	downloadName := strings.TrimSuffix(baseName, filepath.Ext(baseName)) + ".html"
 
@@ -225,15 +232,17 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, downloadName))
 
 	data := struct {
-		Title   string
-		CSS     template.CSS
-		Content template.HTML
-		Source  template.HTML
+		Title          string
+		CSS            template.CSS
+		Content        template.HTML
+		Source         template.HTML
+		ContainerClass string
 	}{
-		Title:   baseName,
-		CSS:     template.CSS(cssContent),
-		Content: template.HTML(content),
-		Source:  template.HTML(escapedSource),
+		Title:          baseName,
+		CSS:            template.CSS(cssContent),
+		Content:        template.HTML(content),
+		Source:         template.HTML(escapedSource),
+		ContainerClass: containerClass,
 	}
 
 	if err := exportTemplate.Execute(w, data); err != nil {

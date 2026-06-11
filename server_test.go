@@ -206,8 +206,8 @@ func TestHandleIndex(t *testing.T) {
 		if !strings.Contains(body, "Test Content") {
 			t.Error("Page should contain rendered content")
 		}
-		if !strings.Contains(body, `class="save-button"`) || !strings.Contains(body, "/export?file=") {
-			t.Error("Page should contain Save button linking to /export")
+		if !strings.Contains(body, `class="export-button"`) || !strings.Contains(body, "/export?file=") {
+			t.Error("Page should contain export button linking to /export")
 		}
 
 		// Cleanup
@@ -897,6 +897,59 @@ func TestHandleExport(t *testing.T) {
 			if !strings.Contains(inner, escaped) {
 				t.Errorf("Embedded source should contain escaped %s sequence", escaped)
 			}
+		}
+	})
+
+	// RecordsViewportWidth verifies that the width query parameter selects the
+	// container class baked into the snapshot: 1200 adds the w1200 class, while
+	// no parameter or an unknown value falls back to the default width
+	t.Run("RecordsViewportWidth", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testFile := filepath.Join(tmpDir, "wide.md")
+
+		if err := os.WriteFile(testFile, []byte("# Wide\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		filesLock.Lock()
+		files[testFile] = &FileState{
+			path:       testFile,
+			sseClients: make(map[chan string]bool),
+		}
+		filesLock.Unlock()
+		defer func() {
+			filesLock.Lock()
+			delete(files, testFile)
+			filesLock.Unlock()
+		}()
+
+		if err := renderMarkdown(testFile); err != nil {
+			t.Fatal(err)
+		}
+
+		cases := []struct {
+			name  string
+			query string
+			class string
+		}{
+			{"Wide", "&width=1200", `<div class="container w1200">`},
+			{"Default", "", `<div class="container">`},
+			{"UnknownValue", "&width=800", `<div class="container">`},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				req := httptest.NewRequest("GET", "/export?file="+testFile+tc.query, nil)
+				w := httptest.NewRecorder()
+
+				handleExport(w, req)
+
+				if w.Code != http.StatusOK {
+					t.Fatalf("Expected status 200, got %d", w.Code)
+				}
+				if !strings.Contains(w.Body.String(), tc.class) {
+					t.Errorf("Exported HTML should contain %s", tc.class)
+				}
+			})
 		}
 	})
 }

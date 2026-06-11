@@ -10,7 +10,13 @@
     </head>
     <body>
         <div class="toolbar">
-            <a class="save-button" href="/export?file={{.File}}" download>Save</a>
+            <a
+                class="export-button"
+                href="/export?file={{.File}}"
+                title="Download a self-contained HTML snapshot of this page"
+                download
+                >Export HTML</a
+            >
             <div class="width-switcher">
                 <button data-width="900">900</button>
                 <button data-width="1200">1200</button>
