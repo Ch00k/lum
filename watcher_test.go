@@ -218,9 +218,72 @@ func TestStartWatchingFile(t *testing.T) {
 		content := string(fileState.htmlContent)
 		fileState.contentLock.RUnlock()
 
-		// Should contain some version of "Rapid change"
-		if !contains(content, "Rapid change") {
-			t.Error("Content should reflect rapid changes")
+		// Debouncing must settle on the last write, not an intermediate one
+		if !contains(content, "Rapid change 4") {
+			t.Errorf("Content should reflect the final rapid change, got: %s", content)
+		}
+
+		// Cleanup
+		filesLock.Lock()
+		if fileState.watcher != nil {
+			_ = fileState.watcher.Close()
+		}
+		delete(files, testFile)
+		filesLock.Unlock()
+	})
+
+	// A writer that truncates before writing leaves the file momentarily empty.
+	// The render must reflect the content written after the truncation, not the
+	// empty file the truncation left behind.
+	t.Run("TruncateThenWrite", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testFile := filepath.Join(tmpDir, "test.md")
+
+		if err := os.WriteFile(testFile, []byte("# Initial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		filesLock.Lock()
+		files[testFile] = &FileState{
+			path:       testFile,
+			sseClients: make(map[chan string]bool),
+		}
+		filesLock.Unlock()
+
+		if err := renderMarkdown(testFile); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := startWatchingFile(testFile); err != nil {
+			t.Fatal(err)
+		}
+
+		time.Sleep(200 * time.Millisecond)
+
+		f, err := os.OpenFile(testFile, os.O_WRONLY|os.O_TRUNC, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(20 * time.Millisecond)
+		if _, err := f.WriteString("# After Truncate"); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		time.Sleep(500 * time.Millisecond)
+
+		filesLock.RLock()
+		fileState := files[testFile]
+		filesLock.RUnlock()
+
+		fileState.contentLock.RLock()
+		content := string(fileState.htmlContent)
+		fileState.contentLock.RUnlock()
+
+		if !contains(content, "After Truncate") {
+			t.Errorf("Content should reflect the write following the truncation, got: %s", content)
 		}
 
 		// Cleanup

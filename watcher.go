@@ -59,9 +59,11 @@ func startWatchingFile(filePath string) error {
 			}
 		}()
 
-		// Debouncing: track last reload time to avoid multiple rapid reloads
-		var lastReload time.Time
+		// Debouncing: a burst of events renders once, debounceDelay after the
+		// last one. Rendering on the first event of a burst would capture the
+		// file mid-save, e.g. empty right after a truncating writer opened it.
 		debounceDelay := 100 * time.Millisecond
+		var debounce <-chan time.Time
 
 		for {
 			select {
@@ -77,36 +79,34 @@ func startWatchingFile(filePath string) error {
 
 				// Handle Write, Create, and Rename events
 				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) {
-					// Debounce: skip if we reloaded very recently
-					now := time.Now()
-					if now.Sub(lastReload) < debounceDelay {
-						continue
-					}
-					lastReload = now
+					debounce = time.After(debounceDelay)
+				}
+			case <-debounce:
+				debounce = nil
 
-					log.Printf("File changed: %s (event: %s)", event.Name, event.Op)
+				log.Printf("File changed: %s", filePath)
 
-					// Retry rendering in case file is temporarily missing during atomic save
-					var err error
-					for range 10 {
-						err = renderMarkdown(filePath)
-						if err == nil {
-							break
-						}
-						// Check if error is "file does not exist" using errors.Is
-						if errors.Is(err, os.ErrNotExist) {
-							time.Sleep(50 * time.Millisecond)
-							continue
-						}
+				// Retry rendering in case file is temporarily missing during atomic save
+				var err error
+				for range 10 {
+					err = renderMarkdown(filePath)
+					if err == nil {
 						break
 					}
-
-					if err != nil {
-						log.Printf("Failed to render markdown: %v", err)
+					// Check if error is "file does not exist" using errors.Is
+					if errors.Is(err, os.ErrNotExist) {
+						time.Sleep(50 * time.Millisecond)
 						continue
 					}
-					notifyClients(filePath, "reload")
+					break
 				}
+
+				if err != nil {
+					log.Printf("Failed to render markdown: %v", err)
+					continue
+				}
+
+				notifyClients(filePath, "reload")
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
