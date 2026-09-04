@@ -62,8 +62,18 @@ func startWatchingFile(filePath string) error {
 		// Debouncing: a burst of events renders once, debounceDelay after the
 		// last one. Rendering on the first event of a burst would capture the
 		// file mid-save, e.g. empty right after a truncating writer opened it.
-		debounceDelay := 100 * time.Millisecond
-		var debounce <-chan time.Time
+		// maxBurstWait caps how long a burst can defer the render, so a writer
+		// that keeps the file busy for longer than that still reaches the
+		// browser instead of holding the reload off until it stops.
+		const (
+			debounceDelay = 100 * time.Millisecond
+			maxBurstWait  = 500 * time.Millisecond
+		)
+
+		var (
+			debounce   <-chan time.Time
+			burstStart time.Time
+		)
 
 		for {
 			select {
@@ -79,7 +89,12 @@ func startWatchingFile(filePath string) error {
 
 				// Handle Write, Create, and Rename events
 				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) {
-					debounce = time.After(debounceDelay)
+					if debounce == nil {
+						burstStart = time.Now()
+					}
+
+					// A negative remaining budget fires the timer immediately
+					debounce = time.After(min(debounceDelay, time.Until(burstStart.Add(maxBurstWait))))
 				}
 			case <-debounce:
 				debounce = nil

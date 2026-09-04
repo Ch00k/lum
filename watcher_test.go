@@ -295,6 +295,137 @@ func TestStartWatchingFile(t *testing.T) {
 		filesLock.Unlock()
 	})
 
+	// The point of debouncing: a burst of filesystem events collapses into a
+	// single render and a single reload, rather than one per event.
+	t.Run("CoalescesBurstIntoOneReload", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testFile := filepath.Join(tmpDir, "test.md")
+
+		if err := os.WriteFile(testFile, []byte("# Initial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		clientChan := make(chan string, 32)
+		filesLock.Lock()
+		files[testFile] = &FileState{
+			path:       testFile,
+			sseClients: map[chan string]bool{clientChan: true},
+		}
+		filesLock.Unlock()
+
+		if err := renderMarkdown(testFile); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := startWatchingFile(testFile); err != nil {
+			t.Fatal(err)
+		}
+
+		time.Sleep(200 * time.Millisecond)
+
+		// The whole burst stays well inside maxBurstWait, so nothing forces an
+		// early render and the events must collapse into exactly one
+		for i := range 5 {
+			content := []byte("# Burst " + string(rune('0'+i)))
+			if err := os.WriteFile(testFile, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		time.Sleep(500 * time.Millisecond)
+
+		reloads := len(clientChan)
+		for range reloads {
+			if msg := <-clientChan; msg != "reload" {
+				t.Errorf("Expected 'reload' message, got %q", msg)
+			}
+		}
+
+		if reloads != 1 {
+			t.Errorf("Expected the burst to coalesce into 1 reload, got %d", reloads)
+		}
+
+		// Cleanup
+		filesLock.Lock()
+		fileState := files[testFile]
+		if fileState.watcher != nil {
+			_ = fileState.watcher.Close()
+		}
+		close(clientChan)
+		delete(files, testFile)
+		filesLock.Unlock()
+	})
+
+	// Writes arriving faster than the debounce delay must not defer the render
+	// for as long as the writing continues.
+	t.Run("RendersDuringContinuousWrites", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testFile := filepath.Join(tmpDir, "test.md")
+
+		if err := os.WriteFile(testFile, []byte("# Initial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		clientChan := make(chan string, 32)
+		filesLock.Lock()
+		files[testFile] = &FileState{
+			path:       testFile,
+			sseClients: map[chan string]bool{clientChan: true},
+		}
+		filesLock.Unlock()
+
+		if err := renderMarkdown(testFile); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := startWatchingFile(testFile); err != nil {
+			t.Fatal(err)
+		}
+
+		time.Sleep(200 * time.Millisecond)
+
+		// Write every 20ms for 1.2s: an unbounded debounce would be reset by
+		// every write and never fire while this goroutine runs
+		var writeErr error
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			deadline := time.Now().Add(1200 * time.Millisecond)
+			for i := 0; time.Now().Before(deadline); i++ {
+				content := []byte("# Continuous " + string(rune('0'+i%10)))
+				if writeErr = os.WriteFile(testFile, content, 0o600); writeErr != nil {
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}()
+
+		select {
+		case msg := <-clientChan:
+			if msg != "reload" {
+				t.Errorf("Expected 'reload' message, got %q", msg)
+			}
+		case <-time.After(1 * time.Second):
+			t.Error("No reload while the file was being written continuously")
+		}
+
+		<-done
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+
+		// Cleanup
+		filesLock.Lock()
+		fileState := files[testFile]
+		if fileState.watcher != nil {
+			_ = fileState.watcher.Close()
+		}
+		close(clientChan)
+		delete(files, testFile)
+		filesLock.Unlock()
+	})
+
 	t.Run("NotifyClientsOnChange", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		testFile := filepath.Join(tmpDir, "test.md")
