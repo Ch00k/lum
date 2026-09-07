@@ -18,7 +18,8 @@ A command-line tool that starts a simple web server to display Markdown files re
 - **GitHub Flavored Markdown**: Tables, task lists, strikethrough, alerts, and more
 - **Index page**: Browse all tracked files from a single page
 - **HTML export**: Download any file as a self-contained HTML snapshot, keeping the selected viewport width
-- **Static asset serving**: Images and other files referenced in Markdown are served relative to the file's directory
+- **Linked documents**: Links to other Markdown files are followable; the target is rendered and watched the first time it is opened
+- **Static asset serving**: Images referenced in Markdown are served from wherever they live, including outside the file's directory
 - **Minimal styling**: Clean, readable CSS
 - **Single binary**: All assets embedded, no external dependencies
 
@@ -99,6 +100,12 @@ lum automatically detects the running daemon and adds files to it.
 - **Specific file**: `http://localhost:6333/?file=/path/to/file.md`
 
 Pages automatically reload when their source file changes.
+
+### Following Links Between Documents
+
+A link to another Markdown file just works: clicking it renders that file and starts watching it, without a separate `lum` invocation. Following a link into a document makes that document's own links followable in turn, so a set of cross-referencing documents can be browsed from whichever one you started with. The index page lists the files you have actually opened.
+
+Only files a rendered document references are reachable this way. A Markdown file that nothing links to has to be passed to `lum` to be served, and the same holds for images and other assets: a document's referenced files are served from wherever they live, and nothing else in their directories is.
 
 ### Stopping the Daemon
 
