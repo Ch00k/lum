@@ -40,7 +40,7 @@ func init() {
 	)
 }
 
-// renderMarkdown reads a markdown file and renders it to HTML, updating the file's state
+// renderMarkdown renders a tracked markdown file, updating the file's state
 func renderMarkdown(filePath string) error {
 	// Look up the file state
 	filesLock.RLock()
@@ -51,14 +51,22 @@ func renderMarkdown(filePath string) error {
 		return fmt.Errorf("file not tracked: %s", filePath)
 	}
 
+	return renderInto(fileState)
+}
+
+// renderInto reads the markdown file a state describes and renders it to HTML,
+// updating that state. It takes the state rather than looking it up by path so
+// a file can be fully rendered before it is published to the tracked files,
+// leaving no window in which a request can find a state without content.
+func renderInto(fileState *FileState) error {
 	// Read and render the file (without holding any locks)
-	content, err := os.ReadFile(filePath)
+	content, err := os.ReadFile(fileState.path)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
 	doc := &documentContext{
-		path: filePath,
+		path: fileState.path,
 		refs: newReferences(),
 	}
 	pc := parser.NewContext()

@@ -329,6 +329,7 @@ func startDaemon(port int, initialFile string) error {
 	// Setup HTTP handlers
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleIndex)
+	mux.HandleFunc("/asset", handleStaticAsset)
 	mux.HandleFunc("/export", handleExport)
 	mux.HandleFunc("/events", handleSSE)
 	mux.HandleFunc("/events/index", handleIndexSSE)
@@ -361,6 +362,7 @@ func startOneOff(port int, filePath string) error {
 	// Setup HTTP handlers
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleIndex)
+	mux.HandleFunc("/asset", handleStaticAsset)
 	mux.HandleFunc("/export", handleExport)
 	mux.HandleFunc("/events", handleSSE)
 	mux.HandleFunc("/events/index", handleIndexSSE)

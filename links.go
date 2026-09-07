@@ -66,11 +66,12 @@ func (t *linkTransformer) Transform(node *ast.Document, reader text.Reader, pc p
 	})
 }
 
-// rewriteLink points a link at a local Markdown file to that file's own page.
-// Links to anything else are left alone.
+// rewriteLink points a link at a local Markdown file to that file's own page,
+// and a link at any other local file to the static asset URL for it, so an
+// attachment beside a document can be opened from it.
 func (t *linkTransformer) rewriteLink(link *ast.Link, doc *documentContext) {
 	path, fragment := resolveReference(string(link.Destination), doc.path)
-	if path == "" || !isMarkdownPath(path) {
+	if path == "" {
 		return
 	}
 
@@ -79,20 +80,27 @@ func (t *linkTransformer) rewriteLink(link *ast.Link, doc *documentContext) {
 		return
 	}
 
-	doc.refs.docs[path] = true
-	link.Destination = []byte(documentURL(path, fragment))
+	if isMarkdownPath(path) {
+		doc.refs.docs[path] = true
+		link.Destination = []byte(documentURL(path, fragment))
+		return
+	}
+
+	doc.refs.assets[path] = true
+	link.Destination = []byte(assetURL(path, doc.path, fragment))
 }
 
 // rewriteImage points an image at a local file to the static asset URL for
-// that file, naming the document it appears in.
+// that file, naming the document it appears in. The fragment is kept: an SVG
+// fragment selects a view or an element within the image.
 func (t *linkTransformer) rewriteImage(image *ast.Image, doc *documentContext) {
-	path, _ := resolveReference(string(image.Destination), doc.path)
+	path, fragment := resolveReference(string(image.Destination), doc.path)
 	if path == "" {
 		return
 	}
 
 	doc.refs.assets[path] = true
-	image.Destination = []byte(assetURL(path, doc.path))
+	image.Destination = []byte(assetURL(path, doc.path, fragment))
 }
 
 // resolveReference resolves a destination to an absolute path, relative
@@ -132,13 +140,14 @@ func documentURL(path, fragment string) string {
 	return u.String()
 }
 
-// assetURL builds the URL for an asset referenced by a document. The path of
-// the asset is carried in the URL path and the document that references it in
-// the query, which is what handleStaticAsset checks the asset against.
-func assetURL(assetPath, documentPath string) string {
+// assetURL builds the URL for an asset referenced by a document, naming both
+// the asset and the document that references it, which is what
+// handleStaticAsset checks the asset against.
+func assetURL(assetPath, documentPath, fragment string) string {
 	u := url.URL{
-		Path:     assetPath,
-		RawQuery: url.Values{"file": {documentPath}}.Encode(),
+		Path:     "/asset",
+		RawQuery: url.Values{"file": {documentPath}, "path": {assetPath}}.Encode(),
+		Fragment: fragment,
 	}
 	return u.String()
 }

@@ -554,10 +554,10 @@ func TestHandleStaticAsset(t *testing.T) {
 	trackDocument(t, markdownFile, content)
 
 	t.Run("ServeAssetBesideDocument", func(t *testing.T) {
-		req := httptest.NewRequest("GET", assetURL(imageFile, markdownFile), nil)
+		req := httptest.NewRequest("GET", assetURL(imageFile, markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status 200, got %d", w.Code)
@@ -574,10 +574,10 @@ func TestHandleStaticAsset(t *testing.T) {
 	})
 
 	t.Run("ServeAssetBelowDocument", func(t *testing.T) {
-		req := httptest.NewRequest("GET", assetURL(subImage, markdownFile), nil)
+		req := httptest.NewRequest("GET", assetURL(subImage, markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status 200, got %d", w.Code)
@@ -585,10 +585,10 @@ func TestHandleStaticAsset(t *testing.T) {
 	})
 
 	t.Run("ServeAssetAboveDocument", func(t *testing.T) {
-		req := httptest.NewRequest("GET", assetURL(aboveImage, markdownFile), nil)
+		req := httptest.NewRequest("GET", assetURL(aboveImage, markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status 200, got %d", w.Code)
@@ -596,10 +596,10 @@ func TestHandleStaticAsset(t *testing.T) {
 	})
 
 	t.Run("Return404ForUnreferencedFile", func(t *testing.T) {
-		req := httptest.NewRequest("GET", assetURL(secretFile, markdownFile), nil)
+		req := httptest.NewRequest("GET", assetURL(secretFile, markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusNotFound {
 			t.Errorf("Expected status 404 for a file the document does not reference, got %d", w.Code)
@@ -607,10 +607,10 @@ func TestHandleStaticAsset(t *testing.T) {
 	})
 
 	t.Run("BlockDirectoryAccess", func(t *testing.T) {
-		req := httptest.NewRequest("GET", assetURL(subDir, markdownFile), nil)
+		req := httptest.NewRequest("GET", assetURL(subDir, markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusNotFound {
 			t.Errorf("Expected status 404 for directory access, got %d", w.Code)
@@ -618,54 +618,64 @@ func TestHandleStaticAsset(t *testing.T) {
 	})
 
 	t.Run("Return404ForNonExistentFile", func(t *testing.T) {
-		req := httptest.NewRequest("GET", assetURL(filepath.Join(docsDir, "missing.jpg"), markdownFile), nil)
+		req := httptest.NewRequest("GET", assetURL(filepath.Join(docsDir, "missing.jpg"), markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusNotFound {
 			t.Errorf("Expected status 404 for nonexistent file, got %d", w.Code)
 		}
 	})
 
-	t.Run("Return404WhenFileParameterMissing", func(t *testing.T) {
-		req := httptest.NewRequest("GET", imageFile, nil)
-		w := httptest.NewRecorder()
+	t.Run("Return400WhenParameterMissing", func(t *testing.T) {
+		urls := map[string]string{
+			"NoDocument": "/asset?path=" + imageFile,
+			"NoAsset":    "/asset?file=" + markdownFile,
+			"Neither":    "/asset",
+		}
 
-		handleIndex(w, req)
+		for name, url := range urls {
+			t.Run(name, func(t *testing.T) {
+				req := httptest.NewRequest("GET", url, nil)
+				w := httptest.NewRecorder()
 
-		if w.Code != http.StatusNotFound {
-			t.Errorf("Expected status 404 when file param missing, got %d", w.Code)
+				handleStaticAsset(w, req)
+
+				if w.Code != http.StatusBadRequest {
+					t.Errorf("Expected status 400, got %d", w.Code)
+				}
+			})
 		}
 	})
 
 	t.Run("Return404WhenMarkdownFileNotTracked", func(t *testing.T) {
 		untrackedFile := filepath.Join(docsDir, "untracked.md")
-		req := httptest.NewRequest("GET", assetURL(imageFile, untrackedFile), nil)
+		req := httptest.NewRequest("GET", assetURL(imageFile, untrackedFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusNotFound {
 			t.Errorf("Expected status 404 for untracked markdown file, got %d", w.Code)
 		}
 	})
 
-	t.Run("BlockPathTraversalAttempt", func(t *testing.T) {
-		patterns := []string{
-			"/../../../etc/passwd?file=" + markdownFile,
-			"/./../../etc/passwd?file=" + markdownFile,
-			"/etc/passwd?file=" + markdownFile,
+	t.Run("BlockUnreferencedPaths", func(t *testing.T) {
+		paths := []string{
+			"/etc/passwd",
+			filepath.Join(docsDir, "..", "..", "..", "etc", "passwd"),
+			filepath.Join(docsDir, "./../../etc/passwd"),
 		}
 
-		for _, pattern := range patterns {
-			req := httptest.NewRequest("GET", pattern, nil)
+		for _, path := range paths {
+			req := httptest.NewRequest("GET", assetURL(path, markdownFile, ""), nil)
 			w := httptest.NewRecorder()
 
-			handleIndex(w, req)
+			handleStaticAsset(w, req)
 
 			if w.Code != http.StatusNotFound {
-				t.Errorf("Expected status 404 for path traversal %s, got %d", pattern, w.Code)
+				t.Errorf("Expected status 404 for unreferenced path %s, got %d", path, w.Code)
 			}
 		}
 	})

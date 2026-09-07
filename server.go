@@ -69,31 +69,31 @@ func init() {
 	exportTemplate = template.Must(template.New("export").Parse(string(exportContent)))
 }
 
-// addFile adds a new file to the tracked files, renders it, and starts watching it.
-// If the file is already tracked, this is a no-op and returns nil.
+// addFile renders a new file, adds it to the tracked files, and starts
+// watching it. If the file is already tracked, this is a no-op and returns nil.
+//
+// The file is rendered before it is published to the tracked files, so every
+// state a request can find already has its content and references. Callers
+// racing to add the same file both render it and the loser discards its work,
+// which costs a redundant render but keeps a half-initialized file from ever
+// being served.
 func addFile(filePath string) error {
-	filesLock.Lock()
-	// Check if file is already tracked
-	if _, exists := files[filePath]; exists {
-		filesLock.Unlock()
-		return nil
-	}
-
-	// Create new file state
 	fileState := &FileState{
 		path:       filePath,
 		sseClients: make(map[chan string]bool),
 	}
-	files[filePath] = fileState
-	filesLock.Unlock()
 
-	// Render the file
-	if err := renderMarkdown(filePath); err != nil {
-		filesLock.Lock()
-		delete(files, filePath)
-		filesLock.Unlock()
+	if err := renderInto(fileState); err != nil {
 		return fmt.Errorf("failed to render file: %w", err)
 	}
+
+	filesLock.Lock()
+	if _, exists := files[filePath]; exists {
+		filesLock.Unlock()
+		return nil
+	}
+	files[filePath] = fileState
+	filesLock.Unlock()
 
 	// Start watching the file
 	if err := startWatchingFile(filePath); err != nil {
@@ -139,24 +139,16 @@ func trackedFile(filePath string) (*FileState, bool) {
 	return fileState, exists
 }
 
-// handleIndex serves either a specific file (if ?file= query param is present),
-// an index page listing all tracked files, or static assets relative to the Markdown file
+// handleIndex serves either a specific file (if ?file= query param is present)
+// or an index page listing all tracked files
 func handleIndex(w http.ResponseWriter, r *http.Request) {
-	filePath := r.URL.Query().Get("file")
-
-	// If path is not "/" and file parameter is present, try to serve as static asset
-	if r.URL.Path != "/" && filePath != "" {
-		handleStaticAsset(w, r, filePath)
-		return
-	}
-
-	// Path must be "/" for HTML pages
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
 
 	// If no file specified, show index page
+	filePath := r.URL.Query().Get("file")
 	if filePath == "" {
 		renderIndexPage(w, r)
 		return
@@ -278,11 +270,19 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleStaticAsset serves a file referenced by a tracked Markdown file. The
-// URL path is the absolute path of the asset, as the link transformer resolved
-// it while rendering the document named by the file parameter. Only paths that
+// handleStaticAsset serves a file referenced by a tracked Markdown file: the
+// document in the file parameter, and the asset in the path parameter as the
+// link transformer resolved it while rendering that document. Only paths the
 // document actually references are served.
-func handleStaticAsset(w http.ResponseWriter, r *http.Request, markdownFilePath string) {
+func handleStaticAsset(w http.ResponseWriter, r *http.Request) {
+	markdownFilePath := r.URL.Query().Get("file")
+	assetPath := r.URL.Query().Get("path")
+
+	if markdownFilePath == "" || assetPath == "" {
+		http.Error(w, "Missing file or path parameter", http.StatusBadRequest)
+		return
+	}
+
 	filesLock.RLock()
 	fileState, exists := files[markdownFilePath]
 	filesLock.RUnlock()
@@ -291,8 +291,6 @@ func handleStaticAsset(w http.ResponseWriter, r *http.Request, markdownFilePath 
 		http.NotFound(w, r)
 		return
 	}
-
-	assetPath := r.URL.Path
 
 	fileState.contentLock.RLock()
 	referenced := fileState.refs.assets[assetPath]
