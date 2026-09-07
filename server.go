@@ -24,6 +24,7 @@ type FileState struct {
 	path        string
 	source      []byte
 	htmlContent []byte
+	refs        references
 	contentLock sync.RWMutex
 	watcher     *fsnotify.Watcher
 	sseClients  map[chan string]bool
@@ -68,31 +69,31 @@ func init() {
 	exportTemplate = template.Must(template.New("export").Parse(string(exportContent)))
 }
 
-// addFile adds a new file to the tracked files, renders it, and starts watching it.
-// If the file is already tracked, this is a no-op and returns nil.
+// addFile renders a new file, adds it to the tracked files, and starts
+// watching it. If the file is already tracked, this is a no-op and returns nil.
+//
+// The file is rendered before it is published to the tracked files, so every
+// state a request can find already has its content and references. Callers
+// racing to add the same file both render it and the loser discards its work,
+// which costs a redundant render but keeps a half-initialized file from ever
+// being served.
 func addFile(filePath string) error {
-	filesLock.Lock()
-	// Check if file is already tracked
-	if _, exists := files[filePath]; exists {
-		filesLock.Unlock()
-		return nil
-	}
-
-	// Create new file state
 	fileState := &FileState{
 		path:       filePath,
 		sseClients: make(map[chan string]bool),
 	}
-	files[filePath] = fileState
-	filesLock.Unlock()
 
-	// Render the file
-	if err := renderMarkdown(filePath); err != nil {
-		filesLock.Lock()
-		delete(files, filePath)
-		filesLock.Unlock()
+	if err := renderInto(fileState); err != nil {
 		return fmt.Errorf("failed to render file: %w", err)
 	}
+
+	filesLock.Lock()
+	if _, exists := files[filePath]; exists {
+		filesLock.Unlock()
+		return nil
+	}
+	files[filePath] = fileState
+	filesLock.Unlock()
 
 	// Start watching the file
 	if err := startWatchingFile(filePath); err != nil {
@@ -108,34 +109,53 @@ func addFile(filePath string) error {
 	return nil
 }
 
-// handleIndex serves either a specific file (if ?file= query param is present),
-// an index page listing all tracked files, or static assets relative to the Markdown file
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-	filePath := r.URL.Query().Get("file")
+// trackedFile returns the state for a tracked file. A file that is not tracked
+// yet but is linked from a document that is gets added on the spot, so
+// following a link between documents serves the target without a separate lum
+// invocation. Files discovered this way are rendered and watched from the
+// moment they are first opened.
+func trackedFile(filePath string) (*FileState, bool) {
+	filesLock.RLock()
+	fileState, exists := files[filePath]
+	filesLock.RUnlock()
 
-	// If path is not "/" and file parameter is present, try to serve as static asset
-	if r.URL.Path != "/" && filePath != "" {
-		handleStaticAsset(w, r, filePath)
-		return
+	if exists {
+		return fileState, true
 	}
 
-	// Path must be "/" for HTML pages
+	if !isLinkedDocument(filePath) {
+		return nil, false
+	}
+
+	if err := addFile(filePath); err != nil {
+		log.Printf("Failed to add linked document %s: %v", filePath, err)
+		return nil, false
+	}
+
+	filesLock.RLock()
+	fileState, exists = files[filePath]
+	filesLock.RUnlock()
+
+	return fileState, exists
+}
+
+// handleIndex serves either a specific file (if ?file= query param is present)
+// or an index page listing all tracked files
+func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
 
 	// If no file specified, show index page
+	filePath := r.URL.Query().Get("file")
 	if filePath == "" {
 		renderIndexPage(w, r)
 		return
 	}
 
 	// Look up the file
-	filesLock.RLock()
-	fileState, exists := files[filePath]
-	filesLock.RUnlock()
-
+	fileState, exists := trackedFile(filePath)
 	if !exists {
 		http.NotFound(w, r)
 		return
@@ -250,11 +270,21 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleStaticAsset serves a static file relative to the Markdown file's directory
-func handleStaticAsset(w http.ResponseWriter, r *http.Request, markdownFilePath string) {
-	// Verify the markdown file is tracked
+// handleStaticAsset serves a file referenced by a tracked Markdown file: the
+// document in the file parameter, and the asset in the path parameter as the
+// link transformer resolved it while rendering that document. Only paths the
+// document actually references are served.
+func handleStaticAsset(w http.ResponseWriter, r *http.Request) {
+	markdownFilePath := r.URL.Query().Get("file")
+	assetPath := r.URL.Query().Get("path")
+
+	if markdownFilePath == "" || assetPath == "" {
+		http.Error(w, "Missing file or path parameter", http.StatusBadRequest)
+		return
+	}
+
 	filesLock.RLock()
-	_, exists := files[markdownFilePath]
+	fileState, exists := files[markdownFilePath]
 	filesLock.RUnlock()
 
 	if !exists {
@@ -262,54 +292,16 @@ func handleStaticAsset(w http.ResponseWriter, r *http.Request, markdownFilePath 
 		return
 	}
 
-	// Get the requested asset path
-	// URL paths always start with /, so strip it first
-	assetPath := r.URL.Path[1:]
-	if assetPath == "" {
+	fileState.contentLock.RLock()
+	referenced := fileState.refs.assets[assetPath]
+	fileState.contentLock.RUnlock()
+
+	if !referenced {
 		http.NotFound(w, r)
 		return
 	}
 
-	markdownDir := filepath.Dir(markdownFilePath)
-
-	// Try two interpretations:
-	// 1. Relative to markdown directory (most common)
-	// 2. Absolute filesystem path (for explicit absolute paths in markdown)
-
-	relativePath := filepath.Join(markdownDir, assetPath)
-	relativePath = filepath.Clean(relativePath)
-
-	absolutePath := filepath.Clean("/" + assetPath)
-
-	// Check which interpretation is valid (within directory AND file exists)
-	var fullAssetPath string
-	relativeValid := isPathWithinDirectory(relativePath, markdownDir)
-	absoluteValid := isPathWithinDirectory(absolutePath, markdownDir)
-
-	// Prefer the interpretation where the file actually exists
-	_, relativeExists := os.Stat(relativePath)
-	_, absoluteExists := os.Stat(absolutePath)
-
-	if relativeValid && relativeExists == nil {
-		// Relative interpretation: file exists
-		fullAssetPath = relativePath
-	} else if absoluteValid && absoluteExists == nil {
-		// Absolute interpretation: file exists
-		fullAssetPath = absolutePath
-	} else if relativeValid {
-		// Fall back to relative even if file doesn't exist (will 404 later)
-		fullAssetPath = relativePath
-	} else if absoluteValid {
-		// Fall back to absolute even if file doesn't exist (will 404 later)
-		fullAssetPath = absolutePath
-	} else {
-		// Neither interpretation is within allowed directory - return 404 to avoid leaking info
-		http.NotFound(w, r)
-		return
-	}
-
-	// Check if file exists
-	info, err := os.Stat(fullAssetPath)
+	info, err := os.Stat(assetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			http.NotFound(w, r)
@@ -325,8 +317,7 @@ func handleStaticAsset(w http.ResponseWriter, r *http.Request, markdownFilePath 
 		return
 	}
 
-	// Serve the file
-	http.ServeFile(w, r, fullAssetPath)
+	http.ServeFile(w, r, assetPath)
 }
 
 // renderIndexPage renders the index page listing all tracked files
@@ -510,26 +501,4 @@ func notifyIndexClients(message string) {
 		default:
 		}
 	}
-}
-
-// isPathWithinDirectory checks if path is within dir or its subdirectories
-func isPathWithinDirectory(path, dir string) bool {
-	// Get absolute paths
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	absDir, err := filepath.Abs(dir)
-	if err != nil {
-		return false
-	}
-
-	// Ensure absDir ends with separator for proper prefix matching
-	if !os.IsPathSeparator(absDir[len(absDir)-1]) {
-		absDir += string(filepath.Separator)
-	}
-
-	// Check if absPath starts with absDir (meaning it's within the directory tree)
-	// Also allow exact match with the directory itself
-	return absPath == absDir[:len(absDir)-1] || len(absPath) >= len(absDir) && absPath[:len(absDir)] == absDir
 }

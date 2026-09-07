@@ -513,51 +513,51 @@ func TestRenderIndexPage(t *testing.T) {
 
 func TestHandleStaticAsset(t *testing.T) {
 	tmpDir := t.TempDir()
-	markdownFile := filepath.Join(tmpDir, "test.md")
-
-	// Create test markdown file
-	if err := os.WriteFile(markdownFile, []byte("# Test"), 0o600); err != nil {
+	docsDir := filepath.Join(tmpDir, "docs")
+	subDir := filepath.Join(docsDir, "assets")
+	if err := os.MkdirAll(subDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create test image in same directory
-	imageFile := filepath.Join(tmpDir, "image.jpg")
+	// Assets around the document: beside it, below it, and above it
+	imageFile := filepath.Join(docsDir, "image.jpg")
 	imageData := []byte("fake image data")
 	if err := os.WriteFile(imageFile, imageData, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create subdirectory with image
-	subDir := filepath.Join(tmpDir, "assets")
-	if err := os.MkdirAll(subDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	subImage := filepath.Join(subDir, "logo.png")
 	if err := os.WriteFile(subImage, []byte("fake png data"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// Add markdown file to tracking
-	if err := addFile(markdownFile); err != nil {
+	aboveImage := filepath.Join(tmpDir, "above.png")
+	if err := os.WriteFile(aboveImage, []byte("fake png data"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	defer func() {
-		filesLock.Lock()
-		if fs, ok := files[markdownFile]; ok {
-			if fs.watcher != nil {
-				_ = fs.watcher.Close()
-			}
-			delete(files, markdownFile)
-		}
-		filesLock.Unlock()
-	}()
+	// A file beside the document that the document never mentions
+	secretFile := filepath.Join(docsDir, "secret.txt")
+	if err := os.WriteFile(secretFile, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-	t.Run("ServeRelativePathImage", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/image.jpg?file="+markdownFile, nil)
+	markdownFile := filepath.Join(docsDir, "test.md")
+	content := strings.Join([]string{
+		"![beside](./image.jpg)",
+		"![below](assets/logo.png)",
+		"![above](../above.png)",
+		"![directory](./assets)",
+		"![missing](./missing.jpg)",
+	}, "\n\n")
+
+	trackDocument(t, markdownFile, content)
+
+	t.Run("ServeAssetBesideDocument", func(t *testing.T) {
+		req := httptest.NewRequest("GET", assetURL(imageFile, markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status 200, got %d", w.Code)
@@ -573,50 +573,44 @@ func TestHandleStaticAsset(t *testing.T) {
 		}
 	})
 
-	t.Run("ServeSubdirectoryImage", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/assets/logo.png?file="+markdownFile, nil)
+	t.Run("ServeAssetBelowDocument", func(t *testing.T) {
+		req := httptest.NewRequest("GET", assetURL(subImage, markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status 200, got %d", w.Code)
 		}
 	})
 
-	t.Run("ServeAbsolutePathWithinDirectory", func(t *testing.T) {
-		req := httptest.NewRequest("GET", imageFile+"?file="+markdownFile, nil)
+	t.Run("ServeAssetAboveDocument", func(t *testing.T) {
+		req := httptest.NewRequest("GET", assetURL(aboveImage, markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status 200, got %d", w.Code)
 		}
-
-		if w.Body.String() != string(imageData) {
-			t.Error("Image data doesn't match for absolute path")
-		}
 	})
 
-	t.Run("BlockAbsolutePathOutsideDirectory", func(t *testing.T) {
-		// Try to access a file outside the markdown directory
-		outsideFile := "/etc/passwd"
-		req := httptest.NewRequest("GET", outsideFile+"?file="+markdownFile, nil)
+	t.Run("Return404ForUnreferencedFile", func(t *testing.T) {
+		req := httptest.NewRequest("GET", assetURL(secretFile, markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusNotFound {
-			t.Errorf("Expected status 404 for outside path, got %d", w.Code)
+			t.Errorf("Expected status 404 for a file the document does not reference, got %d", w.Code)
 		}
 	})
 
 	t.Run("BlockDirectoryAccess", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/assets?file="+markdownFile, nil)
+		req := httptest.NewRequest("GET", assetURL(subDir, markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusNotFound {
 			t.Errorf("Expected status 404 for directory access, got %d", w.Code)
@@ -624,88 +618,65 @@ func TestHandleStaticAsset(t *testing.T) {
 	})
 
 	t.Run("Return404ForNonExistentFile", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/nonexistent.jpg?file="+markdownFile, nil)
+		req := httptest.NewRequest("GET", assetURL(filepath.Join(docsDir, "missing.jpg"), markdownFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusNotFound {
 			t.Errorf("Expected status 404 for nonexistent file, got %d", w.Code)
 		}
 	})
 
-	t.Run("Return404WhenFileParameterMissing", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/image.jpg", nil)
-		w := httptest.NewRecorder()
+	t.Run("Return400WhenParameterMissing", func(t *testing.T) {
+		urls := map[string]string{
+			"NoDocument": "/asset?path=" + imageFile,
+			"NoAsset":    "/asset?file=" + markdownFile,
+			"Neither":    "/asset",
+		}
 
-		handleIndex(w, req)
+		for name, url := range urls {
+			t.Run(name, func(t *testing.T) {
+				req := httptest.NewRequest("GET", url, nil)
+				w := httptest.NewRecorder()
 
-		if w.Code != http.StatusNotFound {
-			t.Errorf("Expected status 404 when file param missing, got %d", w.Code)
+				handleStaticAsset(w, req)
+
+				if w.Code != http.StatusBadRequest {
+					t.Errorf("Expected status 400, got %d", w.Code)
+				}
+			})
 		}
 	})
 
 	t.Run("Return404WhenMarkdownFileNotTracked", func(t *testing.T) {
-		untrackedFile := filepath.Join(tmpDir, "untracked.md")
-		req := httptest.NewRequest("GET", "/image.jpg?file="+untrackedFile, nil)
+		untrackedFile := filepath.Join(docsDir, "untracked.md")
+		req := httptest.NewRequest("GET", assetURL(imageFile, untrackedFile, ""), nil)
 		w := httptest.NewRecorder()
 
-		handleIndex(w, req)
+		handleStaticAsset(w, req)
 
 		if w.Code != http.StatusNotFound {
 			t.Errorf("Expected status 404 for untracked markdown file, got %d", w.Code)
 		}
 	})
 
-	t.Run("BlockPathTraversalAttempt", func(t *testing.T) {
-		// Try various path traversal patterns
-		patterns := []string{
-			"/../../../etc/passwd?file=" + markdownFile,
-			"/./../../etc/passwd?file=" + markdownFile,
-			"/../etc/passwd?file=" + markdownFile,
+	t.Run("BlockUnreferencedPaths", func(t *testing.T) {
+		paths := []string{
+			"/etc/passwd",
+			filepath.Join(docsDir, "..", "..", "..", "etc", "passwd"),
+			filepath.Join(docsDir, "./../../etc/passwd"),
 		}
 
-		for _, pattern := range patterns {
-			req := httptest.NewRequest("GET", pattern, nil)
+		for _, path := range paths {
+			req := httptest.NewRequest("GET", assetURL(path, markdownFile, ""), nil)
 			w := httptest.NewRecorder()
 
-			handleIndex(w, req)
+			handleStaticAsset(w, req)
 
 			if w.Code != http.StatusNotFound {
-				t.Errorf("Expected status 404 for path traversal %s, got %d", pattern, w.Code)
+				t.Errorf("Expected status 404 for unreferenced path %s, got %d", path, w.Code)
 			}
-		}
-	})
-}
-
-func TestIsPathWithinDirectory(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	t.Run("PathWithinDirectory", func(t *testing.T) {
-		path := filepath.Join(tmpDir, "subdir", "file.txt")
-		if !isPathWithinDirectory(path, tmpDir) {
-			t.Error("Path should be within directory")
-		}
-	})
-
-	t.Run("PathEqualsDirectory", func(t *testing.T) {
-		if !isPathWithinDirectory(tmpDir, tmpDir) {
-			t.Error("Directory should be within itself")
-		}
-	})
-
-	t.Run("PathOutsideDirectory", func(t *testing.T) {
-		outside := filepath.Join(filepath.Dir(tmpDir), "other")
-		if isPathWithinDirectory(outside, tmpDir) {
-			t.Error("Path should not be within directory")
-		}
-	})
-
-	t.Run("PathTraversalBlocked", func(t *testing.T) {
-		// Even though this technically resolves to outside, it should be blocked
-		traversal := filepath.Join(tmpDir, "..", "..", "etc", "passwd")
-		if isPathWithinDirectory(traversal, tmpDir) {
-			t.Error("Path traversal should be blocked")
 		}
 	})
 }
