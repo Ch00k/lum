@@ -337,6 +337,60 @@ func TestServeLinkedDocument(t *testing.T) {
 	})
 }
 
+// TestServeReferencedPathOutsideDocumentTree pins the trust boundary the
+// README describes: a document decides what lum serves on its behalf, so a
+// path it references is served even when it lives nowhere near the document.
+// Confining references to a root would be a deliberate change, not a fix.
+func TestServeReferencedPathOutsideDocumentTree(t *testing.T) {
+	tmpDir := t.TempDir()
+	docsDir := filepath.Join(tmpDir, "docs")
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.MkdirAll(docsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(elsewhere, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// An asset and a document in an unrelated directory tree
+	outsideAsset := filepath.Join(elsewhere, "logo.png")
+	if err := os.WriteFile(outsideAsset, []byte("fake png data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	outsideDoc := filepath.Join(elsewhere, "outside.md")
+	if err := os.WriteFile(outsideDoc, []byte("# Outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupTracking(t, outsideDoc)
+
+	doc := filepath.Join(docsDir, "index.md")
+	trackDocument(t, doc, "![logo]("+outsideAsset+")\n\n[outside]("+outsideDoc+")")
+
+	t.Run("Asset", func(t *testing.T) {
+		req := httptest.NewRequest("GET", assetURL(outsideAsset, doc, ""), nil)
+		w := httptest.NewRecorder()
+
+		handleStaticAsset(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("Document", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/?file="+outsideDoc, nil)
+		w := httptest.NewRecorder()
+
+		handleIndex(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+}
+
 // TestConcurrentFirstOpenOfLinkedDocument checks that requests racing to open
 // a document that is not tracked yet all get its content. The file is rendered
 // before it is published to the tracked files, so no request can find a state

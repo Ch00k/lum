@@ -111,6 +111,14 @@ Only files a rendered document references are reachable this way. A Markdown fil
 
 This works from Markdown links and images. A raw HTML `<img src="./diagram.png">` written directly in the document is passed through untouched and will not load; use `![](./diagram.png)` instead.
 
+### Trust Boundary
+
+lum trusts the documents you point it at, the way a shell trusts a script you run.
+
+A document decides what lum will serve on its behalf. It can reference any path its author chose - an absolute one, or one well outside its own directory - and lum serves that path for as long as the document is tracked. Markdown is also rendered with raw HTML enabled, so a document can run scripts in your browser on lum's own origin.
+
+Together those mean that opening a Markdown file you don't trust lets it read any file your user account can read. The server listens on 127.0.0.1 only, so nothing on the network can reach it, but treat `lum somefile.md` the way you would treat running `somefile.sh`.
+
 ### Stopping the Daemon
 
 ```bash
