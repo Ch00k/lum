@@ -21,11 +21,13 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -206,8 +208,12 @@ func TestIntegrationOneOffMode(t *testing.T) {
 	}()
 
 	select {
-	case <-done:
-		// Process exited
+	case err := <-done:
+		// One-off mode installs no signal handler, so the interrupt terminates it
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.Sys().(syscall.WaitStatus).Signal() != syscall.SIGINT {
+			t.Errorf("Expected the process to be terminated by SIGINT, got: %v", err)
+		}
 	case <-time.After(5 * time.Second):
 		if err := cmd.Process.Kill(); err != nil {
 			t.Logf("Failed to kill process: %v", err)
@@ -340,8 +346,10 @@ func TestIntegrationDaemonMode(t *testing.T) {
 	}()
 
 	select {
-	case <-done:
-		// Daemon stopped
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Daemon exited with error after --stop: %v", err)
+		}
 	case <-time.After(5 * time.Second):
 		t.Error("Daemon did not stop after --stop command")
 	}
