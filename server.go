@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"html/template"
@@ -204,8 +206,17 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// mermaidETag is the entity tag of the embedded mermaid runtime. A browser
+// revalidates its cached copy against it on each live reload, which costs a
+// 304 response instead of the whole runtime. A failed read is reported by
+// handleMermaidJS, which reads the runtime itself.
+var mermaidETag = sync.OnceValue(func() string {
+	jsContent, _ := assets.ReadFile("assets/mermaid.min.js")
+	return fmt.Sprintf(`"%x"`, sha256.Sum256(jsContent))
+})
+
 // handleMermaidJS serves the embedded mermaid runtime for the live file view
-func handleMermaidJS(w http.ResponseWriter, _ *http.Request) {
+func handleMermaidJS(w http.ResponseWriter, r *http.Request) {
 	jsContent, err := assets.ReadFile("assets/mermaid.min.js")
 	if err != nil {
 		log.Printf("Failed to read mermaid runtime: %v", err)
@@ -214,9 +225,9 @@ func handleMermaidJS(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	if _, err := w.Write(jsContent); err != nil {
-		log.Printf("Failed to write mermaid runtime: %v", err)
-	}
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", mermaidETag())
+	http.ServeContent(w, r, "mermaid.js", time.Time{}, bytes.NewReader(jsContent))
 }
 
 // scriptCloseTag matches the </script sequence in any case; HTML treats

@@ -79,13 +79,11 @@ func renderInto(fileState *FileState) error {
 		return fmt.Errorf("failed to convert markdown: %w", err)
 	}
 
-	html := buf.Bytes()
-
 	// Update the HTML content with the file's lock
 	fileState.contentLock.Lock()
 	fileState.source = content
-	fileState.htmlContent = html
-	fileState.hasMermaid = bytes.Contains(html, []byte(`<pre class="mermaid">`))
+	fileState.htmlContent = buf.Bytes()
+	fileState.hasMermaid = doc.hasMermaid
 	fileState.refs = doc.refs
 	fileState.contentLock.Unlock()
 

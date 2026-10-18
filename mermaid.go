@@ -40,7 +40,7 @@ func NewMermaid(source []byte) *Mermaid {
 type mermaidTransformer struct{}
 
 // Transform implements parser.ASTTransformer
-func (t *mermaidTransformer) Transform(node *ast.Document, reader text.Reader, _ parser.Context) {
+func (t *mermaidTransformer) Transform(node *ast.Document, reader text.Reader, pc parser.Context) {
 	source := reader.Source()
 
 	var blocks []*ast.FencedCodeBlock
@@ -64,6 +64,10 @@ func (t *mermaidTransformer) Transform(node *ast.Document, reader text.Reader, _
 	for _, block := range blocks {
 		mermaid := NewMermaid(codeBlockValue(block, source))
 		block.Parent().ReplaceChild(block.Parent(), block, mermaid)
+	}
+
+	if doc, ok := pc.Get(documentContextKey).(*documentContext); ok && len(blocks) > 0 {
+		doc.hasMermaid = true
 	}
 }
 

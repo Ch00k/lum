@@ -27,10 +27,13 @@ func newReferences() references {
 }
 
 // documentContext carries the path of the document being rendered into the
-// link transformer, and the references it found back out.
+// link transformer, and what the transformers found back out: the references
+// the link transformer collected, and whether the mermaid transformer replaced
+// any diagram.
 type documentContext struct {
-	path string
-	refs references
+	path       string
+	refs       references
+	hasMermaid bool
 }
 
 var documentContextKey = parser.NewContextKey()

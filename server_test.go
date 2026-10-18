@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -991,7 +992,9 @@ func TestHandleExport(t *testing.T) {
 }
 
 // TestHandleMermaidJS checks that /mermaid.js serves the embedded mermaid
-// runtime as JavaScript.
+// runtime as JavaScript with an entity tag, and answers a request carrying that
+// tag with 304 Not Modified, which is what a live reload sends once the browser
+// has the runtime cached.
 func TestHandleMermaidJS(t *testing.T) {
 	req := httptest.NewRequest("GET", "/mermaid.js", nil)
 	w := httptest.NewRecorder()
@@ -1007,5 +1010,38 @@ func TestHandleMermaidJS(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `globalThis["mermaid"]`) {
 		t.Error("Response should contain the mermaid runtime")
+	}
+
+	etag := result.Header.Get("ETag")
+	if etag == "" {
+		t.Fatal("Response should carry an ETag")
+	}
+
+	req = httptest.NewRequest("GET", "/mermaid.js", nil)
+	req.Header.Set("If-None-Match", etag)
+	w = httptest.NewRecorder()
+
+	handleMermaidJS(w, req)
+
+	if w.Code != http.StatusNotModified {
+		t.Errorf("Expected status 304 for a matching ETag, got %d", w.Code)
+	}
+	if w.Body.Len() != 0 {
+		t.Errorf("A 304 response should have no body, got %d bytes", w.Body.Len())
+	}
+}
+
+// TestMermaidRuntimeIsSafeToInline checks that the vendored mermaid runtime
+// contains no "<script" or "</script" in any case. The export inlines it into a
+// <script> element, where either sequence would end the element early or change
+// how the HTML parser finds its end.
+func TestMermaidRuntimeIsSafeToInline(t *testing.T) {
+	jsContent, err := assets.ReadFile("assets/mermaid.min.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if regexp.MustCompile(`(?i)</?script`).Match(jsContent) {
+		t.Error("The mermaid runtime contains a script tag sequence and cannot be inlined into the export")
 	}
 }
