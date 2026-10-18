@@ -23,6 +23,13 @@
             </div>
         </div>
         <div class="container">{{.Content}}</div>
+        {{if .HasMermaid}}
+        <script src="/mermaid.js"></script>
+        <script>
+            mermaid.initialize({ startOnLoad: false });
+            mermaid.run();
+        </script>
+        {{end}}
         <script>
             const filePath = "{{.File}}";
             {{.JS}}

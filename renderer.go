@@ -28,6 +28,7 @@ func init() {
 			parser.WithAutoHeadingID(),
 			parser.WithASTTransformers(
 				util.Prioritized(newAlertTransformer(), 100),
+				util.Prioritized(&mermaidTransformer{}, 100),
 				util.Prioritized(&linkTransformer{}, 200),
 			),
 		),
@@ -35,6 +36,7 @@ func init() {
 			html.WithUnsafe(),
 			renderer.WithNodeRenderers(
 				util.Prioritized(&alertRenderer{}, 100),
+				util.Prioritized(&mermaidRenderer{}, 100),
 			),
 		),
 	)
@@ -77,10 +79,13 @@ func renderInto(fileState *FileState) error {
 		return fmt.Errorf("failed to convert markdown: %w", err)
 	}
 
+	html := buf.Bytes()
+
 	// Update the HTML content with the file's lock
 	fileState.contentLock.Lock()
 	fileState.source = content
-	fileState.htmlContent = buf.Bytes()
+	fileState.htmlContent = html
+	fileState.hasMermaid = bytes.Contains(html, []byte(`<pre class="mermaid">`))
 	fileState.refs = doc.refs
 	fileState.contentLock.Unlock()
 

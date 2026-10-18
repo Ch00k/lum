@@ -8,6 +8,96 @@ import (
 	"testing"
 )
 
+// renderContent renders content as a tracked document and returns the rendered
+// HTML together with the document's mermaid flag.
+func renderContent(t *testing.T, content string) (string, bool) {
+	t.Helper()
+
+	fileState := trackDocument(t, filepath.Join(t.TempDir(), "doc.md"), content)
+
+	fileState.contentLock.RLock()
+	defer fileState.contentLock.RUnlock()
+
+	return string(fileState.htmlContent), fileState.hasMermaid
+}
+
+// TestMermaidRendering checks that mermaid fenced code blocks render as
+// <pre class="mermaid"> elements holding the escaped diagram source, wherever
+// they are nested, and that the document's mermaid flag tracks their presence.
+func TestMermaidRendering(t *testing.T) {
+	t.Run("RendersAsMermaidPreBlock", func(t *testing.T) {
+		content := "# Title\n\n```mermaid\ngraph TD\n    A --> B\n```\n"
+
+		html, hasMermaid := renderContent(t, content)
+
+		if !hasMermaid {
+			t.Error("hasMermaid should be true when a mermaid block is present")
+		}
+		if !strings.Contains(html, `<pre class="mermaid">graph TD`) {
+			t.Errorf("Expected a mermaid pre block, got:\n%s", html)
+		}
+		// The mermaid block must not be handed to the syntax highlighter, which
+		// wraps code in inline-styled spans.
+		if strings.Contains(html, `<pre class="mermaid"><span`) {
+			t.Error("Mermaid block should not be syntax-highlighted")
+		}
+	})
+
+	t.Run("EscapesHTMLInSource", func(t *testing.T) {
+		content := "```mermaid\ngraph TD\n    A -->|\"a < b & c\"| B\n```\n"
+
+		html, _ := renderContent(t, content)
+
+		if !strings.Contains(html, "a &lt; b &amp; c") {
+			t.Errorf("Mermaid source should be HTML-escaped, got:\n%s", html)
+		}
+		if strings.Contains(html, "a < b & c") {
+			t.Error("Raw unescaped angle bracket/ampersand leaked into HTML")
+		}
+	})
+
+	t.Run("LanguageMatchIsCaseInsensitive", func(t *testing.T) {
+		content := "```Mermaid\ngraph TD\n    A --> B\n```\n"
+
+		html, hasMermaid := renderContent(t, content)
+
+		if !hasMermaid || !strings.Contains(html, `<pre class="mermaid">`) {
+			t.Errorf("Uppercase language token should still be treated as mermaid, got:\n%s", html)
+		}
+	})
+
+	t.Run("RendersInsideNestedBlocks", func(t *testing.T) {
+		content := "> [!NOTE]\n> ```mermaid\n> graph TD\n>     A --> B\n> ```\n\n" +
+			"- item\n\n  ```mermaid\n  graph LR\n      C --> D\n  ```\n"
+
+		html, hasMermaid := renderContent(t, content)
+
+		if !hasMermaid {
+			t.Error("hasMermaid should be true for nested mermaid blocks")
+		}
+		if strings.Count(html, `<pre class="mermaid">`) != 2 {
+			t.Errorf("Expected mermaid blocks inside both the alert and the list item, got:\n%s", html)
+		}
+	})
+
+	t.Run("NonMermaidCodeStillHighlighted", func(t *testing.T) {
+		content := "```go\nfunc main() {}\n```\n"
+
+		html, hasMermaid := renderContent(t, content)
+
+		if hasMermaid {
+			t.Error("hasMermaid should be false without a mermaid block")
+		}
+		if strings.Contains(html, `class="mermaid"`) {
+			t.Error("A go code block must not be rendered as mermaid")
+		}
+		// goldmark-highlighting emits inline styles for highlighted code.
+		if !strings.Contains(html, "<pre") || !strings.Contains(html, "style=") {
+			t.Errorf("Go code block should be syntax-highlighted, got:\n%s", html)
+		}
+	})
+}
+
 func TestRenderMarkdownEdgeCases(t *testing.T) {
 	t.Run("EmptyFile", func(t *testing.T) {
 		tmpDir := t.TempDir()

@@ -12,5 +12,14 @@
         <div class="{{.ContainerClass}}">{{.Content}}</div>
         <!-- prettier-ignore -->
         <script type="text/markdown" id="lum-source">{{.Source}}</script>
+        {{if .HasMermaid}}
+        <script>
+            {{.MermaidJS}}
+        </script>
+        <script>
+            mermaid.initialize({ startOnLoad: false });
+            mermaid.run();
+        </script>
+        {{end}}
     </body>
 </html>

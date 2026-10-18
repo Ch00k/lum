@@ -24,6 +24,7 @@ type FileState struct {
 	path        string
 	source      []byte
 	htmlContent []byte
+	hasMermaid  bool
 	refs        references
 	contentLock sync.RWMutex
 	watcher     *fsnotify.Watcher
@@ -164,6 +165,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	// Read content with the file's lock
 	fileState.contentLock.RLock()
 	content := fileState.htmlContent
+	hasMermaid := fileState.hasMermaid
 	fileState.contentLock.RUnlock()
 
 	cssContent, err := assets.ReadFile("assets/style.css")
@@ -181,22 +183,39 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := struct {
-		Title   string
-		CSS     template.CSS
-		Content template.HTML
-		JS      template.JS
-		File    string
+		Title      string
+		CSS        template.CSS
+		Content    template.HTML
+		JS         template.JS
+		File       string
+		HasMermaid bool
 	}{
-		Title:   filepath.Base(filePath),
-		CSS:     template.CSS(cssContent),
-		Content: template.HTML(content),
-		JS:      template.JS(jsContent),
-		File:    filePath,
+		Title:      filepath.Base(filePath),
+		CSS:        template.CSS(cssContent),
+		Content:    template.HTML(content),
+		JS:         template.JS(jsContent),
+		File:       filePath,
+		HasMermaid: hasMermaid,
 	}
 
 	if err := fileTemplate.Execute(w, data); err != nil {
 		log.Printf("Failed to execute file template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+// handleMermaidJS serves the embedded mermaid runtime for the live file view
+func handleMermaidJS(w http.ResponseWriter, _ *http.Request) {
+	jsContent, err := assets.ReadFile("assets/mermaid.min.js")
+	if err != nil {
+		log.Printf("Failed to read mermaid runtime: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	if _, err := w.Write(jsContent); err != nil {
+		log.Printf("Failed to write mermaid runtime: %v", err)
 	}
 }
 
@@ -230,12 +249,22 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 	fileState.contentLock.RLock()
 	content := fileState.htmlContent
 	source := fileState.source
+	hasMermaid := fileState.hasMermaid
 	fileState.contentLock.RUnlock()
 
 	cssContent, err := assets.ReadFile("assets/style.css")
 	if err != nil {
 		log.Printf("Failed to read CSS: %v", err)
 		cssContent = []byte("")
+	}
+
+	var mermaidJS []byte
+	if hasMermaid {
+		mermaidJS, err = assets.ReadFile("assets/mermaid.min.js")
+		if err != nil {
+			log.Printf("Failed to read mermaid runtime: %v", err)
+			hasMermaid = false
+		}
 	}
 
 	escapedSource := scriptCloseTag.ReplaceAll(source, []byte("<\\$1"))
@@ -257,12 +286,16 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 		Content        template.HTML
 		Source         template.HTML
 		ContainerClass string
+		HasMermaid     bool
+		MermaidJS      template.JS
 	}{
 		Title:          baseName,
 		CSS:            template.CSS(cssContent),
 		Content:        template.HTML(content),
 		Source:         template.HTML(escapedSource),
 		ContainerClass: containerClass,
+		HasMermaid:     hasMermaid,
+		MermaidJS:      template.JS(mermaidJS),
 	}
 
 	if err := exportTemplate.Execute(w, data); err != nil {

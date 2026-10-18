@@ -16,6 +16,7 @@ A command-line tool that starts a simple web server to display Markdown files re
 - **Multiple file support**: Serve multiple Markdown files from a single daemon instance
 - **File watching**: Intelligent file monitoring with [fsnotify](https://github.com/fsnotify/fsnotify)
 - **GitHub Flavored Markdown**: Tables, task lists, strikethrough, alerts, and more
+- **Mermaid diagrams**: ` ```mermaid ` code blocks render as diagrams, with the runtime embedded in the binary (works offline)
 - **Index page**: Browse all tracked files from a single page
 - **HTML export**: Download any file as a self-contained HTML snapshot, keeping the selected viewport width
 - **Linked documents**: Links to other Markdown files are followable; the target is rendered and watched the first time it is opened

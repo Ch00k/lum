@@ -162,6 +162,12 @@ pre code {
     word-wrap: normal;
 }
 
+pre.mermaid {
+    background-color: transparent;
+    padding: 0;
+    text-align: center;
+}
+
 blockquote {
     border-left: 4px solid #ddd;
     color: #666;
