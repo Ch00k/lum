@@ -1,4 +1,4 @@
-.PHONY: lint test test-verbose test-one test-ci build run release release-patch release-minor release-major
+.PHONY: lint test test-verbose test-one test-ci build run update-mermaid release release-patch release-minor release-major
 
 .EXPORT_ALL_VARIABLES:
 
@@ -8,6 +8,7 @@ LUM_TEST_EXECUTABLE_FILENAME ?= lum.test
 LUM_TEST_EXECUTABLE ?= $(LUM_BUILD_ARTIFACTS_DIR)/$(LUM_TEST_EXECUTABLE_FILENAME)
 LUM_VERSION ?= dev
 GOCOVERDIR ?= $(CURDIR)/coverage
+MERMAID_VERSION ?= 12.2.0
 
 lint:
 	golangci-lint run --fix
@@ -33,6 +34,13 @@ build:
 
 run:
 	go run . --port 16333 README.md
+
+# Vendor the mermaid runtime and its license from the npm package
+update-mermaid:
+	curl -sfL -o mermaid.tgz https://registry.npmjs.org/mermaid/-/mermaid-$(MERMAID_VERSION).tgz
+	tar -xzOf mermaid.tgz package/dist/mermaid.min.js > assets/mermaid.min.js
+	tar -xzOf mermaid.tgz package/LICENSE > assets/mermaid.LICENSE
+	rm mermaid.tgz
 
 release:
 	@echo "Available release types:"

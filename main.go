@@ -333,6 +333,7 @@ func startDaemon(port int, initialFile string) error {
 	mux.HandleFunc("/export", handleExport)
 	mux.HandleFunc("/events", handleSSE)
 	mux.HandleFunc("/events/index", handleIndexSSE)
+	mux.HandleFunc("/mermaid.js", handleMermaidJS)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	log.Printf("Daemon started on http://%s", addr)
@@ -366,6 +367,7 @@ func startOneOff(port int, filePath string) error {
 	mux.HandleFunc("/export", handleExport)
 	mux.HandleFunc("/events", handleSSE)
 	mux.HandleFunc("/events/index", handleIndexSSE)
+	mux.HandleFunc("/mermaid.js", handleMermaidJS)
 
 	// Try to create listener first to check if port is available
 	addr := fmt.Sprintf("127.0.0.1:%d", port)

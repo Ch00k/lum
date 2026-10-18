@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -209,11 +210,36 @@ func TestHandleIndex(t *testing.T) {
 		if !strings.Contains(body, `class="export-button"`) || !strings.Contains(body, "/export?file=") {
 			t.Error("Page should contain export button linking to /export")
 		}
+		if strings.Contains(body, `src="/mermaid.js"`) {
+			t.Error("A diagram-free page should not link the mermaid runtime")
+		}
 
 		// Cleanup
 		filesLock.Lock()
 		delete(files, testFile)
 		filesLock.Unlock()
+	})
+
+	t.Run("SpecificFileWithMermaid", func(t *testing.T) {
+		testFile := filepath.Join(t.TempDir(), "diagram.md")
+		trackDocument(t, testFile, "# Diagram\n\n```mermaid\ngraph TD\n    A --> B\n```\n")
+
+		req := httptest.NewRequest("GET", "/?file="+testFile, nil)
+		w := httptest.NewRecorder()
+
+		handleIndex(w, req)
+
+		body := w.Body.String()
+
+		if !strings.Contains(body, `<pre class="mermaid">`) {
+			t.Error("Page should contain the mermaid block")
+		}
+		if !strings.Contains(body, `src="/mermaid.js"`) {
+			t.Error("Page with a diagram should link the mermaid runtime")
+		}
+		if !strings.Contains(body, "mermaid.run()") {
+			t.Error("Page with a diagram should invoke mermaid.run()")
+		}
 	})
 
 	t.Run("SpecificFileNotFound", func(t *testing.T) {
@@ -923,4 +949,99 @@ func TestHandleExport(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("InlinesMermaidRuntimeWhenPresent", func(t *testing.T) {
+		testFile := filepath.Join(t.TempDir(), "diagram.md")
+		trackDocument(t, testFile, "# Diagram\n\n```mermaid\ngraph TD\n    A --> B\n```\n")
+
+		req := httptest.NewRequest("GET", "/export?file="+testFile, nil)
+		w := httptest.NewRecorder()
+
+		handleExport(w, req)
+
+		body := w.Body.String()
+
+		if !strings.Contains(body, `<pre class="mermaid">`) {
+			t.Error("Exported HTML should contain the mermaid block")
+		}
+		// The runtime is inlined, not referenced, so the export stays standalone.
+		if strings.Contains(body, `src="/mermaid.js"`) {
+			t.Error("Export should inline the mermaid runtime, not reference it")
+		}
+		if !strings.Contains(body, `globalThis["mermaid"]`) {
+			t.Error("Exported HTML should inline the mermaid runtime")
+		}
+		if !strings.Contains(body, "mermaid.run()") {
+			t.Error("Exported HTML should invoke mermaid.run()")
+		}
+	})
+
+	t.Run("OmitsMermaidRuntimeWhenAbsent", func(t *testing.T) {
+		testFile := filepath.Join(t.TempDir(), "plain.md")
+		trackDocument(t, testFile, "# Plain\n\nNo diagram here.\n")
+
+		req := httptest.NewRequest("GET", "/export?file="+testFile, nil)
+		w := httptest.NewRecorder()
+
+		handleExport(w, req)
+
+		if strings.Contains(w.Body.String(), "mermaid.run()") {
+			t.Error("Export without a diagram should not include the mermaid runtime")
+		}
+	})
+}
+
+// TestHandleMermaidJS checks that /mermaid.js serves the embedded mermaid
+// runtime as JavaScript with an entity tag, and answers a request carrying that
+// tag with 304 Not Modified, which is what a live reload sends once the browser
+// has the runtime cached.
+func TestHandleMermaidJS(t *testing.T) {
+	req := httptest.NewRequest("GET", "/mermaid.js", nil)
+	w := httptest.NewRecorder()
+
+	handleMermaidJS(w, req)
+
+	result := w.Result()
+	if result.StatusCode != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", result.StatusCode)
+	}
+	if ct := result.Header.Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Errorf("Expected a JavaScript content type, got %q", ct)
+	}
+	if !strings.Contains(w.Body.String(), `globalThis["mermaid"]`) {
+		t.Error("Response should contain the mermaid runtime")
+	}
+
+	etag := result.Header.Get("ETag")
+	if etag == "" {
+		t.Fatal("Response should carry an ETag")
+	}
+
+	req = httptest.NewRequest("GET", "/mermaid.js", nil)
+	req.Header.Set("If-None-Match", etag)
+	w = httptest.NewRecorder()
+
+	handleMermaidJS(w, req)
+
+	if w.Code != http.StatusNotModified {
+		t.Errorf("Expected status 304 for a matching ETag, got %d", w.Code)
+	}
+	if w.Body.Len() != 0 {
+		t.Errorf("A 304 response should have no body, got %d bytes", w.Body.Len())
+	}
+}
+
+// TestMermaidRuntimeIsSafeToInline checks that the vendored mermaid runtime
+// contains no "<script" or "</script" in any case. The export inlines it into a
+// <script> element, where either sequence would end the element early or change
+// how the HTML parser finds its end.
+func TestMermaidRuntimeIsSafeToInline(t *testing.T) {
+	jsContent, err := assets.ReadFile("assets/mermaid.min.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if regexp.MustCompile(`(?i)</?script`).Match(jsContent) {
+		t.Error("The mermaid runtime contains a script tag sequence and cannot be inlined into the export")
+	}
 }
