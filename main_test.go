@@ -494,3 +494,24 @@ func TestIsTerminal(t *testing.T) {
 		t.Error("A regular file was taken for a terminal")
 	}
 }
+
+// TestHyperlinks verifies that a character device takes hyperlinks unless
+// TERM is dumb. /dev/null stands in for a terminal: it is a character device
+// too
+func TestHyperlinks(t *testing.T) {
+	device, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = device.Close() }()
+
+	t.Setenv("TERM", "xterm-256color")
+	if !hyperlinks(device) {
+		t.Error("Expected hyperlinks on a character device")
+	}
+
+	t.Setenv("TERM", "dumb")
+	if hyperlinks(device) {
+		t.Error("Expected no hyperlinks with TERM=dumb")
+	}
+}

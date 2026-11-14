@@ -82,10 +82,16 @@ func parseArgs(args []string) (*options, []string, error) {
 	return opts, positional, nil
 }
 
-// printURL prints url on a line of its own, as a hyperlink when stdout is a
-// terminal that interprets escape sequences (TERM=dumb says it does not)
+// printURL prints url on a line of its own, as a hyperlink when stdout takes
+// them
 func printURL(url string) {
-	fmt.Println(formatURL(url, isTerminal(os.Stdout) && os.Getenv("TERM") != "dumb"))
+	fmt.Println(formatURL(url, hyperlinks(os.Stdout)))
+}
+
+// hyperlinks reports whether f is a terminal that interprets escape sequences,
+// which TERM=dumb says it does not
+func hyperlinks(f *os.File) bool {
+	return isTerminal(f) && os.Getenv("TERM") != "dumb"
 }
 
 // formatURL returns url as is, or for a terminal wrapped in an OSC 8
