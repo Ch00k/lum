@@ -77,8 +77,8 @@ func TestMultiFileEndToEnd(t *testing.T) {
 			t.Fatalf("Failed to add second file: %v", err)
 		}
 
-		if !strings.Contains(url, file2) {
-			t.Errorf("URL doesn't contain file path: %s", url)
+		if expected := fileURL(fmt.Sprintf("localhost:%d", port), file2); url != expected {
+			t.Errorf("Expected URL %s, got %s", expected, url)
 		}
 
 		// Verify second file is accessible
@@ -125,8 +125,8 @@ func TestMultiFileEndToEnd(t *testing.T) {
 			t.Fatalf("Failed to add duplicate file: %v", err)
 		}
 
-		if !strings.Contains(url, file1) {
-			t.Errorf("URL doesn't contain file path: %s", url)
+		if expected := fileURL(fmt.Sprintf("localhost:%d", port), file1); url != expected {
+			t.Errorf("Expected URL %s, got %s", expected, url)
 		}
 	})
 
@@ -455,4 +455,63 @@ func TestRunErrorPaths(t *testing.T) {
 			t.Error("daemonExists should return false when no daemon running")
 		}
 	})
+}
+
+// TestFormatURL verifies that a URL is wrapped in an OSC 8 hyperlink for a
+// terminal and printed as is otherwise
+func TestFormatURL(t *testing.T) {
+	url := "http://127.0.0.1:6333/?file=/tmp/test.md"
+
+	if got := formatURL(url, false); got != url {
+		t.Errorf("Expected %q, got %q", url, got)
+	}
+
+	expected := "\x1b]8;;" + url + "\x1b\\" + url + "\x1b]8;;\x1b\\"
+	if got := formatURL(url, true); got != expected {
+		t.Errorf("Expected %q, got %q", expected, got)
+	}
+}
+
+// TestIsTerminal verifies that a pipe and a regular file are not taken for a
+// terminal, so the URL lum prints into either stays plain
+func TestIsTerminal(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
+	if isTerminal(writer) {
+		t.Error("A pipe was taken for a terminal")
+	}
+
+	file, err := os.Create(filepath.Join(t.TempDir(), "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	if isTerminal(file) {
+		t.Error("A regular file was taken for a terminal")
+	}
+}
+
+// TestHyperlinks verifies that a character device takes hyperlinks unless
+// TERM is dumb. /dev/null stands in for a terminal: it is a character device
+// too
+func TestHyperlinks(t *testing.T) {
+	device, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = device.Close() }()
+
+	t.Setenv("TERM", "xterm-256color")
+	if !hyperlinks(device) {
+		t.Error("Expected hyperlinks on a character device")
+	}
+
+	t.Setenv("TERM", "dumb")
+	if hyperlinks(device) {
+		t.Error("Expected no hyperlinks with TERM=dumb")
+	}
 }

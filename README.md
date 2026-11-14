@@ -132,6 +132,8 @@ lum -s
 
 Whenever lum prints a URL, it also tries to open it in your default browser (`xdg-open` on Linux, `open` on macOS). This is skipped when no browser is expected to be available: on headless systems (no `DISPLAY` or `WAYLAND_DISPLAY` on Linux) or when the opener is not installed. To disable it entirely, set the `LUM_NO_BROWSER` environment variable to any non-empty value.
 
+On a terminal, the URL is printed as an OSC 8 hyperlink, so a terminal that supports them can open it whole even when the line wraps (in a narrow tmux pane, for instance; tmux passes hyperlinks through once its `terminal-features` include `hyperlinks`). When stdout is not a terminal, or `TERM` is `dumb`, the URL is printed plain.
+
 ### Custom Port
 
 ```bash

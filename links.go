@@ -143,6 +143,13 @@ func documentURL(path, fragment string) string {
 	return u.String()
 }
 
+// fileURL builds the full URL, on the server at host, of the page for a
+// Markdown file. The path is percent-encoded, so the URL survives any
+// character in it and stays printable ASCII.
+func fileURL(host, path string) string {
+	return "http://" + host + documentURL(path, "")
+}
+
 // assetURL builds the URL for an asset referenced by a document, naming both
 // the asset and the document that references it, which is what
 // handleStaticAsset checks the asset against.

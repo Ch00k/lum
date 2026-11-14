@@ -133,7 +133,7 @@ func handleControlCommand(conn net.Conn, port int) {
 			return
 		}
 
-		url := fmt.Sprintf("http://localhost:%d/?file=%s", port, filePath)
+		url := fileURL(fmt.Sprintf("localhost:%d", port), filePath)
 		if _, err := fmt.Fprintf(conn, "OK %s\n", url); err != nil {
 			log.Printf("Failed to write success response: %v", err)
 			return
