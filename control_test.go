@@ -285,7 +285,7 @@ func TestHandleControlCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		expectedResponse := fmt.Sprintf("OK http://localhost:%d/?file=%s\n", port, testFile)
+		expectedResponse := fmt.Sprintf("OK %s\n", fileURL(fmt.Sprintf("localhost:%d", port), testFile))
 		actualResponse := string(buf[:n])
 		if actualResponse != expectedResponse {
 			t.Errorf("Expected response:\n%q\nGot:\n%q", expectedResponse, actualResponse)
@@ -346,8 +346,8 @@ func TestTryAddToExistingServer(t *testing.T) {
 		if url == "" {
 			t.Error("Expected URL to be returned")
 		}
-		if !contains(url, testFile2) {
-			t.Errorf("Expected URL to contain file path, got: %s", url)
+		if expected := fileURL(fmt.Sprintf("localhost:%d", port), testFile2); url != expected {
+			t.Errorf("Expected URL %s, got %s", expected, url)
 		}
 	})
 }

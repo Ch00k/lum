@@ -83,9 +83,9 @@ func parseArgs(args []string) (*options, []string, error) {
 }
 
 // printURL prints url on a line of its own, as a hyperlink when stdout is a
-// terminal
+// terminal that interprets escape sequences (TERM=dumb says it does not)
 func printURL(url string) {
-	fmt.Println(formatURL(url, isTerminal(os.Stdout)))
+	fmt.Println(formatURL(url, isTerminal(os.Stdout) && os.Getenv("TERM") != "dumb"))
 }
 
 // formatURL returns url as is, or for a terminal wrapped in an OSC 8
@@ -175,7 +175,7 @@ func run() int {
 			addr := fmt.Sprintf("127.0.0.1:%d", port)
 			url := fmt.Sprintf("http://%s", addr)
 			if initialFile != "" {
-				url = fmt.Sprintf("http://%s/?file=%s", addr, initialFile)
+				url = fileURL(addr, initialFile)
 			}
 			printURL(url)
 			openBrowserWhenReady(addr, url)
@@ -399,7 +399,7 @@ func startOneOff(port int, filePath string) error {
 	}
 
 	// Port is available, print URL
-	url := fmt.Sprintf("http://%s/?file=%s", addr, filePath)
+	url := fileURL(addr, filePath)
 	printURL(url)
 	openBrowser(url)
 

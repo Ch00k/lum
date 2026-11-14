@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -462,4 +463,28 @@ func cleanupTracking(t *testing.T, path string) {
 		}
 		filesLock.Unlock()
 	})
+}
+
+// TestFileURL verifies that a file URL stays printable ASCII, as an OSC 8
+// hyperlink requires, and carries the path intact whatever characters it has
+func TestFileURL(t *testing.T) {
+	path := "/tmp/Документы/a b#c&d+e.md"
+	got := fileURL("127.0.0.1:6333", path)
+
+	for i := 0; i < len(got); i++ {
+		if got[i] <= ' ' || got[i] > '~' {
+			t.Fatalf("Byte %q at %d of %q is not printable ASCII", got[i], i, got)
+		}
+	}
+
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Host != "127.0.0.1:6333" || parsed.Path != "/" {
+		t.Errorf("Unexpected URL %q", got)
+	}
+	if file := parsed.Query().Get("file"); file != path {
+		t.Errorf("Expected file %q, got %q", path, file)
+	}
 }

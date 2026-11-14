@@ -77,8 +77,8 @@ func TestMultiFileEndToEnd(t *testing.T) {
 			t.Fatalf("Failed to add second file: %v", err)
 		}
 
-		if !strings.Contains(url, file2) {
-			t.Errorf("URL doesn't contain file path: %s", url)
+		if expected := fileURL(fmt.Sprintf("localhost:%d", port), file2); url != expected {
+			t.Errorf("Expected URL %s, got %s", expected, url)
 		}
 
 		// Verify second file is accessible
@@ -125,8 +125,8 @@ func TestMultiFileEndToEnd(t *testing.T) {
 			t.Fatalf("Failed to add duplicate file: %v", err)
 		}
 
-		if !strings.Contains(url, file1) {
-			t.Errorf("URL doesn't contain file path: %s", url)
+		if expected := fileURL(fmt.Sprintf("localhost:%d", port), file1); url != expected {
+			t.Errorf("Expected URL %s, got %s", expected, url)
 		}
 	})
 
