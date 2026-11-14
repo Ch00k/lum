@@ -456,3 +456,41 @@ func TestRunErrorPaths(t *testing.T) {
 		}
 	})
 }
+
+// TestFormatURL verifies that a URL is wrapped in an OSC 8 hyperlink for a
+// terminal and printed as is otherwise
+func TestFormatURL(t *testing.T) {
+	url := "http://127.0.0.1:6333/?file=/tmp/test.md"
+
+	if got := formatURL(url, false); got != url {
+		t.Errorf("Expected %q, got %q", url, got)
+	}
+
+	expected := "\x1b]8;;" + url + "\x1b\\" + url + "\x1b]8;;\x1b\\"
+	if got := formatURL(url, true); got != expected {
+		t.Errorf("Expected %q, got %q", expected, got)
+	}
+}
+
+// TestIsTerminal verifies that a pipe and a regular file are not taken for a
+// terminal, so the URL lum prints into either stays plain
+func TestIsTerminal(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
+	if isTerminal(writer) {
+		t.Error("A pipe was taken for a terminal")
+	}
+
+	file, err := os.Create(filepath.Join(t.TempDir(), "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	if isTerminal(file) {
+		t.Error("A regular file was taken for a terminal")
+	}
+}

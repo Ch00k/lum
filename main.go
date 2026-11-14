@@ -82,6 +82,28 @@ func parseArgs(args []string) (*options, []string, error) {
 	return opts, positional, nil
 }
 
+// printURL prints url on a line of its own, as a hyperlink when stdout is a
+// terminal
+func printURL(url string) {
+	fmt.Println(formatURL(url, isTerminal(os.Stdout)))
+}
+
+// formatURL returns url as is, or for a terminal wrapped in an OSC 8
+// hyperlink, which the terminal can open whole even when the line wraps
+func formatURL(url string, terminal bool) string {
+	if !terminal {
+		return url
+	}
+	return "\x1b]8;;" + url + "\x1b\\" + url + "\x1b]8;;\x1b\\"
+}
+
+// isTerminal reports whether f is a character device, which a terminal is
+// and a pipe or a regular file is not
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
 func main() {
 	os.Exit(run())
 }
@@ -155,7 +177,7 @@ func run() int {
 			if initialFile != "" {
 				url = fmt.Sprintf("http://%s/?file=%s", addr, initialFile)
 			}
-			fmt.Println(url)
+			printURL(url)
 			openBrowserWhenReady(addr, url)
 			return 0
 		}
@@ -195,7 +217,7 @@ func run() int {
 	url, err := tryAddToExistingServer(absPath)
 	if err == nil {
 		// Added to existing daemon
-		fmt.Println(url)
+		printURL(url)
 		openBrowser(url)
 		return 0
 	}
@@ -378,7 +400,7 @@ func startOneOff(port int, filePath string) error {
 
 	// Port is available, print URL
 	url := fmt.Sprintf("http://%s/?file=%s", addr, filePath)
-	fmt.Println(url)
+	printURL(url)
 	openBrowser(url)
 
 	// Start serving
